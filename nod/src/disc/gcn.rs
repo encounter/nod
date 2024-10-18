@@ -170,6 +170,7 @@ pub(crate) fn read_part_meta(
     reader
         .read_exact(&mut raw_apploader[size_of::<ApploaderHeader>()..])
         .context("Reading apploader")?;
+    let raw_apploader = raw_apploader.into_boxed_slice();
 
     // fst.bin
     reader
@@ -207,13 +208,14 @@ pub(crate) fn read_part_meta(
         .unwrap_or(size_of::<DolHeader>() as u32);
     raw_dol.resize(dol_size as usize, 0);
     reader.read_exact(&mut raw_dol[size_of::<DolHeader>()..]).context("Reading DOL")?;
+    let raw_dol = raw_dol.into_boxed_slice();
 
     Ok(Box::new(PartitionMeta {
         raw_boot,
         raw_bi2,
-        raw_apploader: raw_apploader.into_boxed_slice(),
+        raw_apploader,
         raw_fst,
-        raw_dol: raw_dol.into_boxed_slice(),
+        raw_dol,
         raw_ticket: None,
         raw_tmd: None,
         raw_cert_chain: None,

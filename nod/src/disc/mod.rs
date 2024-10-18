@@ -26,7 +26,7 @@ pub use fst::{Fst, Node, NodeKind};
 pub use streams::{FileStream, OwnedFileStream, WindowedStream};
 pub use wii::{SignedHeader, Ticket, TicketLimit, TmdHeader, REGION_SIZE};
 
-/// Size in bytes of a disc sector.
+/// Size in bytes of a disc sector. (32 KiB)
 pub const SECTOR_SIZE: usize = 0x8000;
 
 /// Magic bytes for Wii discs. Located at offset 0x18.
@@ -361,10 +361,10 @@ pub struct PartitionMeta {
     pub raw_bi2: Box<[u8; BI2_SIZE]>,
     /// Apploader (apploader.bin)
     pub raw_apploader: Box<[u8]>,
-    /// File system table (fst.bin)
-    pub raw_fst: Box<[u8]>,
     /// Main binary (main.dol)
     pub raw_dol: Box<[u8]>,
+    /// File system table (fst.bin)
+    pub raw_fst: Box<[u8]>,
     /// Ticket (ticket.bin, Wii only)
     pub raw_ticket: Option<Box<[u8]>>,
     /// TMD (tmd.bin, Wii only)

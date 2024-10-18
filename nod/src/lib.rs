@@ -66,8 +66,8 @@ use std::{
 pub use disc::{
     ApploaderHeader, DiscHeader, DolHeader, FileStream, Fst, Node, NodeKind, OwnedFileStream,
     PartitionBase, PartitionHeader, PartitionKind, PartitionMeta, SignedHeader, Ticket,
-    TicketLimit, TmdHeader, WindowedStream, BI2_SIZE, BOOT_SIZE, GCN_MAGIC, REGION_SIZE,
-    SECTOR_SIZE, WII_MAGIC,
+    TicketLimit, TmdHeader, WindowedStream, BI2_SIZE, BOOT_SIZE, DL_DVD_SIZE, GCN_MAGIC,
+    MINI_DVD_SIZE, REGION_SIZE, SECTOR_SIZE, SL_DVD_SIZE, WII_MAGIC,
 };
 pub use io::{
     block::{DiscStream, PartitionInfo},
