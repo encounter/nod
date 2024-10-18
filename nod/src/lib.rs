@@ -73,6 +73,7 @@ pub use io::{
     block::{DiscStream, PartitionInfo},
     Compression, DiscMeta, Format, KeyBytes, MagicBytes,
 };
+pub use util::lfg::LaggedFibonacci;
 
 mod disc;
 mod io;

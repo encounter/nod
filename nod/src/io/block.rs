@@ -1,5 +1,4 @@
 use std::{
-    cmp::min,
     fs, io,
     io::{Read, Seek},
     path::Path,
@@ -375,23 +374,19 @@ fn generate_junk(
     partition: Option<&PartitionInfo>,
     disc_header: &DiscHeader,
 ) {
-    let (mut pos, mut offset) = if partition.is_some() {
+    let (pos, offset) = if partition.is_some() {
         (sector as u64 * SECTOR_DATA_SIZE as u64, HASHES_SIZE)
     } else {
         (sector as u64 * SECTOR_SIZE as u64, 0)
     };
     out[..offset].fill(0);
-    while offset < SECTOR_SIZE {
-        // The LFG spans a single sector of the decrypted data,
-        // so we may need to initialize it multiple times
-        let mut lfg = LaggedFibonacci::default();
-        lfg.init_with_seed(*array_ref![disc_header.game_id, 0, 4], disc_header.disc_num, pos);
-        let sector_end = (pos + SECTOR_SIZE as u64) & !(SECTOR_SIZE as u64 - 1);
-        let len = min(SECTOR_SIZE - offset, (sector_end - pos) as usize);
-        lfg.fill(&mut out[offset..offset + len]);
-        pos += len as u64;
-        offset += len;
-    }
+    let mut lfg = LaggedFibonacci::default();
+    lfg.fill_sector_chunked(
+        &mut out[offset..],
+        *array_ref![disc_header.game_id, 0, 4],
+        disc_header.disc_num,
+        pos,
+    );
 }
 
 fn rebuild_hash_block(out: &mut [u8; SECTOR_SIZE], part_sector: u32, partition: &PartitionInfo) {
