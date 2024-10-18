@@ -119,10 +119,9 @@ impl<'a> Fst<'a> {
         let c_string = CStr::from_bytes_until_nul(name_buf).map_err(|_| {
             format!("FST: name at offset {} not null-terminated", node.name_offset())
         })?;
-        let (decoded, _, errors) = SHIFT_JIS.decode(c_string.to_bytes());
-        if errors {
-            return Err(format!("FST: Failed to decode name at offset {}", node.name_offset()));
-        }
+        let (decoded, _, _) = SHIFT_JIS.decode(c_string.to_bytes());
+        // Ignore decoding errors, we can't do anything about them. Consumers may check for
+        // U+FFFD (REPLACEMENT CHARACTER), or fetch the raw bytes from the string table.
         Ok(decoded)
     }
 
