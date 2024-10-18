@@ -9,10 +9,10 @@ strip = "debuginfo"
 codegen-units = 1
 
 [workspace.package]
-version = "1.4.3"
+version = "1.4.4"
 edition = "2021"
 rust-version = "1.74"
 authors = ["Luke Street <luke@street.dev>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/encounter/nod-rs"
+repository = "https://github.com/encounter/nod"
 keywords = ["gamecube", "wii", "iso", "wbfs", "rvz"]

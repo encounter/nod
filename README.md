@@ -1,12 +1,12 @@
 # nod [![Build Status]][actions] [![Latest Version]][crates.io] [![Api Rustdoc]][rustdoc] ![Rust Version]
 
-[Build Status]: https://github.com/encounter/nod-rs/actions/workflows/build.yaml/badge.svg
-[actions]: https://github.com/encounter/nod-rs/actions
+[Build Status]: https://github.com/encounter/nod/actions/workflows/build.yaml/badge.svg
+[actions]: https://github.com/encounter/nod/actions
 [Latest Version]: https://img.shields.io/crates/v/nod.svg
 [crates.io]: https://crates.io/crates/nod
 [Api Rustdoc]: https://img.shields.io/badge/api-rustdoc-blue.svg
 [rustdoc]: https://docs.rs/nod
-[Rust Version]: https://img.shields.io/badge/rust-1.73+-blue.svg?maxAge=3600
+[Rust Version]: https://img.shields.io/badge/rust-1.74+-blue.svg?maxAge=3600
 
 Library for traversing & reading Nintendo Optical Disc (GameCube and Wii) images.
 
