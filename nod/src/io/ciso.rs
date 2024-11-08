@@ -85,7 +85,7 @@ impl BlockIO for DiscIOCISO {
         &mut self,
         out: &mut [u8],
         block: u32,
-        _partition: Option<&PartitionInfo>,
+        partition: Option<&PartitionInfo>,
     ) -> io::Result<Block> {
         if block >= CISO_MAP_SIZE as u32 {
             // Out of bounds
@@ -109,7 +109,11 @@ impl BlockIO for DiscIOCISO {
             + phys_block as u64 * self.header.block_size.get() as u64;
         self.inner.seek(SeekFrom::Start(file_offset))?;
         self.inner.read_exact(out)?;
-        Ok(Block::Raw)
+
+        match partition {
+            Some(partition) if partition.has_encryption => Ok(Block::PartEncrypted),
+            _ => Ok(Block::Raw),
+        }
     }
 
     fn block_size_internal(&self) -> u32 { self.header.block_size.get() }

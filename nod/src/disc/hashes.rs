@@ -16,7 +16,7 @@ use crate::{
     },
     io::HashBytes,
     util::read::read_box_slice,
-    OpenOptions, Result, ResultContext, SECTOR_SIZE,
+    PartitionOptions, Result, ResultContext, SECTOR_SIZE,
 };
 
 /// In a sector, following the 0x400 byte block of hashes, each 0x400 bytes of decrypted data is
@@ -81,7 +81,7 @@ pub fn rebuild_hashes(reader: &mut DiscReader) -> Result<()> {
 
     // Precompute hashes for zeroed sectors.
     const ZERO_H0_BYTES: &[u8] = &[0u8; HASHES_SIZE];
-    let zero_h0_hash = hash_bytes(ZERO_H0_BYTES);
+    let zero_h0_hash = sha1_hash(ZERO_H0_BYTES);
 
     let partitions = reader.partitions();
     let mut hash_tables = Vec::with_capacity(partitions.len());
@@ -97,8 +97,9 @@ pub fn rebuild_hashes(reader: &mut DiscReader) -> Result<()> {
 
         let group_count = hash_table.h3_hashes.len();
         let mutex = Arc::new(Mutex::new(hash_table));
+        let partition_options = PartitionOptions { validate_hashes: false };
         (0..group_count).into_par_iter().try_for_each_with(
-            (reader.open_partition(part.index, &OpenOptions::default())?, mutex.clone()),
+            (reader.open_partition(part.index, &partition_options)?, mutex.clone()),
             |(stream, mutex), h3_index| -> Result<()> {
                 let mut result = HashResult::new_box_zeroed()?;
                 let mut data_buf = <[u8]>::new_box_zeroed_with_elems(SECTOR_DATA_SIZE)?;
@@ -122,7 +123,7 @@ pub fn rebuild_hashes(reader: &mut DiscReader) -> Result<()> {
                                 .read_exact(&mut data_buf)
                                 .with_context(|| format!("Reading sector {}", part_sector))?;
                             for h0_index in 0..NUM_H0_HASHES {
-                                let h0_hash = hash_bytes(array_ref![
+                                let h0_hash = sha1_hash(array_ref![
                                     data_buf,
                                     h0_index * HASHES_SIZE,
                                     HASHES_SIZE
@@ -196,9 +197,6 @@ pub fn rebuild_hashes(reader: &mut DiscReader) -> Result<()> {
     Ok(())
 }
 
+/// Hashes a byte slice with SHA-1.
 #[inline]
-pub fn hash_bytes(buf: &[u8]) -> HashBytes {
-    let mut hasher = Sha1::new();
-    hasher.update(buf);
-    hasher.finalize().into()
-}
+pub fn sha1_hash(buf: &[u8]) -> HashBytes { HashBytes::from(Sha1::digest(buf)) }

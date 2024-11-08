@@ -3,7 +3,7 @@ use std::{
     io::{BufRead, Read, Seek, SeekFrom},
 };
 
-use zerocopy::FromZeros;
+use zerocopy::{FromBytes, FromZeros};
 
 use super::{
     gcn::PartitionGC,
@@ -16,14 +16,9 @@ use crate::{
     disc::wii::REGION_OFFSET,
     io::block::{Block, BlockIO, PartitionInfo},
     util::read::{read_box, read_from, read_vec},
-    DiscMeta, Error, OpenOptions, Result, ResultContext, SECTOR_SIZE,
+    DiscMeta, Error, OpenOptions, PartitionEncryptionMode, PartitionOptions, Result, ResultContext,
+    SECTOR_SIZE,
 };
-
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-pub enum EncryptionMode {
-    Encrypted,
-    Decrypted,
-}
 
 pub struct DiscReader {
     io: Box<dyn BlockIO>,
@@ -33,7 +28,7 @@ pub struct DiscReader {
     sector_buf: Box<[u8; SECTOR_SIZE]>,
     sector_idx: u32,
     pos: u64,
-    mode: EncryptionMode,
+    mode: PartitionEncryptionMode,
     disc_header: Box<DiscHeader>,
     pub(crate) partitions: Vec<PartitionInfo>,
     hash_tables: Vec<HashTable>,
@@ -71,11 +66,7 @@ impl DiscReader {
             sector_buf: <[u8; SECTOR_SIZE]>::new_box_zeroed()?,
             sector_idx: u32::MAX,
             pos: 0,
-            mode: if options.rebuild_encryption {
-                EncryptionMode::Encrypted
-            } else {
-                EncryptionMode::Decrypted
-            },
+            mode: options.partition_encryption,
             disc_header: DiscHeader::new_box_zeroed()?,
             partitions: vec![],
             hash_tables: vec![],
@@ -84,11 +75,28 @@ impl DiscReader {
         let disc_header: Box<DiscHeader> = read_box(&mut reader).context("Reading disc header")?;
         reader.disc_header = disc_header;
         if reader.disc_header.is_wii() {
+            if reader.disc_header.has_partition_encryption()
+                && !reader.disc_header.has_partition_hashes()
+            {
+                return Err(Error::DiscFormat(
+                    "Wii disc is encrypted but has no partition hashes".to_string(),
+                ));
+            }
+            if !reader.disc_header.has_partition_hashes()
+                && options.partition_encryption == PartitionEncryptionMode::ForceEncrypted
+            {
+                return Err(Error::Other(
+                    "Unsupported: Rebuilding encryption for Wii disc without hashes".to_string(),
+                ));
+            }
             reader.seek(SeekFrom::Start(REGION_OFFSET)).context("Seeking to region info")?;
             reader.region = Some(read_from(&mut reader).context("Reading region info")?);
             reader.partitions = read_partition_info(&mut reader)?;
             // Rebuild hashes if the format requires it
-            if (options.rebuild_encryption || options.validate_hashes) && meta.needs_hash_recovery {
+            if options.partition_encryption != PartitionEncryptionMode::AsIs
+                && meta.needs_hash_recovery
+                && reader.disc_header.has_partition_hashes()
+            {
                 rebuild_hashes(&mut reader)?;
             }
         }
@@ -125,7 +133,7 @@ impl DiscReader {
     pub fn open_partition(
         &self,
         index: usize,
-        options: &OpenOptions,
+        options: &PartitionOptions,
     ) -> Result<Box<dyn PartitionBase>> {
         if self.disc_header.is_gamecube() {
             if index == 0 {
@@ -145,7 +153,7 @@ impl DiscReader {
     pub fn open_partition_kind(
         &self,
         kind: PartitionKind,
-        options: &OpenOptions,
+        options: &PartitionOptions,
     ) -> Result<Box<dyn PartitionBase>> {
         if self.disc_header.is_gamecube() {
             if kind == PartitionKind::Data {
@@ -182,30 +190,51 @@ impl BufRead for DiscReader {
 
         // Read new sector into buffer
         if abs_sector != self.sector_idx {
-            if let Some(partition) = partition {
-                match self.mode {
-                    EncryptionMode::Decrypted => self.block.decrypt(
+            match (self.mode, partition, self.disc_header.has_partition_encryption()) {
+                (PartitionEncryptionMode::Original, Some(partition), true)
+                | (PartitionEncryptionMode::ForceEncrypted, Some(partition), _) => {
+                    self.block.encrypt(
                         self.sector_buf.as_mut(),
                         self.block_buf.as_ref(),
                         abs_sector,
                         partition,
-                    )?,
-                    EncryptionMode::Encrypted => self.block.encrypt(
-                        self.sector_buf.as_mut(),
-                        self.block_buf.as_ref(),
-                        abs_sector,
-                        partition,
-                    )?,
+                    )?;
                 }
-            } else {
-                self.block.copy_raw(
-                    self.sector_buf.as_mut(),
-                    self.block_buf.as_ref(),
-                    abs_sector,
-                    &self.disc_header,
-                )?;
+                (PartitionEncryptionMode::ForceDecrypted, Some(partition), _) => {
+                    self.block.decrypt(
+                        self.sector_buf.as_mut(),
+                        self.block_buf.as_ref(),
+                        abs_sector,
+                        partition,
+                    )?;
+                }
+                (PartitionEncryptionMode::AsIs, _, _) | (_, None, _) | (_, _, false) => {
+                    self.block.copy_raw(
+                        self.sector_buf.as_mut(),
+                        self.block_buf.as_ref(),
+                        abs_sector,
+                        &self.disc_header,
+                    )?;
+                }
             }
             self.sector_idx = abs_sector;
+
+            if self.sector_idx == 0
+                && self.disc_header.is_wii()
+                && matches!(
+                    self.mode,
+                    PartitionEncryptionMode::ForceDecrypted
+                        | PartitionEncryptionMode::ForceEncrypted
+                )
+            {
+                let (disc_header, _) = DiscHeader::mut_from_prefix(self.sector_buf.as_mut())
+                    .expect("Invalid disc header alignment");
+                disc_header.no_partition_encryption = match self.mode {
+                    PartitionEncryptionMode::ForceDecrypted => 1,
+                    PartitionEncryptionMode::ForceEncrypted => 0,
+                    _ => unreachable!(),
+                };
+            }
         }
 
         // Read from sector buffer
@@ -273,8 +302,19 @@ fn read_partition_info(reader: &mut DiscReader) -> Result<Vec<PartitionInfo>> {
                     "Partition {group_idx}:{part_idx} offset is not sector aligned",
                 )));
             }
+
+            let disc_header = reader.header();
             let data_start_offset = entry.offset() + header.data_off();
-            let data_end_offset = data_start_offset + header.data_size();
+            let mut data_size = header.data_size();
+            if data_size == 0 {
+                // Read until next partition or end of disc
+                // TODO: handle multiple partition groups
+                data_size = entries
+                    .get(part_idx + 1)
+                    .map(|part| part.offset() - data_start_offset)
+                    .unwrap_or(reader.disc_size() - data_start_offset);
+            }
+            let data_end_offset = data_start_offset + data_size;
             if data_start_offset % SECTOR_SIZE as u64 != 0
                 || data_end_offset % SECTOR_SIZE as u64 != 0
             {
@@ -293,13 +333,15 @@ fn read_partition_info(reader: &mut DiscReader) -> Result<Vec<PartitionInfo>> {
                 disc_header: DiscHeader::new_box_zeroed()?,
                 partition_header: PartitionHeader::new_box_zeroed()?,
                 hash_table: None,
+                has_encryption: disc_header.has_partition_encryption(),
+                has_hashes: disc_header.has_partition_hashes(),
             };
 
             let mut partition_reader = PartitionWii::new(
                 reader.io.clone(),
                 reader.disc_header.clone(),
                 &info,
-                &OpenOptions::default(),
+                &PartitionOptions { validate_hashes: false },
             )?;
             info.disc_header = read_box(&mut partition_reader).context("Reading disc header")?;
             info.partition_header =

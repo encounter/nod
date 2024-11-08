@@ -83,7 +83,7 @@ impl BlockIO for DiscIOGCZ {
         &mut self,
         out: &mut [u8],
         block: u32,
-        _partition: Option<&PartitionInfo>,
+        partition: Option<&PartitionInfo>,
     ) -> io::Result<Block> {
         if block >= self.header.block_count.get() {
             // Out of bounds
@@ -166,7 +166,11 @@ impl BlockIO for DiscIOGCZ {
             // Copy uncompressed block
             out.copy_from_slice(self.block_buf.as_slice());
         }
-        Ok(Block::Raw)
+
+        match partition {
+            Some(partition) if partition.has_encryption => Ok(Block::PartEncrypted),
+            _ => Ok(Block::Raw),
+        }
     }
 
     fn block_size_internal(&self) -> u32 { self.header.block_size.get() }

@@ -31,7 +31,7 @@ impl BlockIO for DiscIOISO {
         &mut self,
         out: &mut [u8],
         block: u32,
-        _partition: Option<&PartitionInfo>,
+        partition: Option<&PartitionInfo>,
     ) -> io::Result<Block> {
         let offset = block as u64 * SECTOR_SIZE as u64;
         if offset >= self.stream_len {
@@ -48,7 +48,11 @@ impl BlockIO for DiscIOISO {
         } else {
             self.inner.read_exact(out)?;
         }
-        Ok(Block::Raw)
+
+        match partition {
+            Some(partition) if partition.has_encryption => Ok(Block::PartEncrypted),
+            _ => Ok(Block::Raw),
+        }
     }
 
     fn block_size_internal(&self) -> u32 { SECTOR_SIZE as u32 }

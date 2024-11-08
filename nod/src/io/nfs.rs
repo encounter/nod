@@ -9,9 +9,10 @@ use std::{
 use zerocopy::{big_endian::U32, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
 use crate::{
+    array_ref_mut,
     disc::SECTOR_SIZE,
     io::{
-        aes_decrypt,
+        aes_cbc_decrypt,
         block::{Block, BlockIO, PartitionInfo, NFS_MAGIC},
         split::SplitFileReader,
         Format, KeyBytes, MagicBytes,
@@ -125,18 +126,15 @@ impl BlockIO for DiscIONFS {
         self.inner.read_exact(out)?;
 
         // Decrypt
-        let iv_bytes = sector.to_be_bytes();
-        #[rustfmt::skip]
-            let iv: KeyBytes = [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            iv_bytes[0], iv_bytes[1], iv_bytes[2], iv_bytes[3],
-        ];
-        aes_decrypt(&self.key, iv, out);
+        let mut iv = [0u8; 0x10];
+        *array_ref_mut!(iv, 12, 4) = sector.to_be_bytes();
+        aes_cbc_decrypt(&self.key, &iv, out);
 
-        if partition.is_some() {
-            Ok(Block::PartDecrypted { has_hashes: true })
-        } else {
-            Ok(Block::Raw)
+        match partition {
+            Some(partition) if partition.has_encryption => {
+                Ok(Block::PartDecrypted { has_hashes: true })
+            }
+            _ => Ok(Block::Raw),
         }
     }
 

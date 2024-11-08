@@ -46,8 +46,8 @@
 //! Converting a disc image to raw ISO:
 //!
 //! ```no_run
-//! // Enable `rebuild_encryption` to ensure the output is a valid ISO.
-//! let options = nod::OpenOptions { rebuild_encryption: true, ..Default::default() };
+//! // Enable `PartitionEncryptionMode::Original` to ensure the output is a valid ISO.
+//! let options = nod::OpenOptions { partition_encryption: nod::PartitionEncryptionMode::Original };
 //! let mut disc = nod::Disc::new_with_options("path/to/file.rvz", &options)
 //!     .expect("Failed to open disc");
 //!
@@ -64,9 +64,9 @@ use std::{
 };
 
 pub use disc::{
-    ApploaderHeader, DiscHeader, DolHeader, FileStream, Fst, Node, NodeKind, OwnedFileStream,
-    PartitionBase, PartitionHeader, PartitionKind, PartitionMeta, SignedHeader, Ticket,
-    TicketLimit, TmdHeader, WindowedStream, BI2_SIZE, BOOT_SIZE, DL_DVD_SIZE, GCN_MAGIC,
+    ApploaderHeader, ContentMetadata, DiscHeader, DolHeader, FileStream, Fst, Node, NodeKind,
+    OwnedFileStream, PartitionBase, PartitionHeader, PartitionKind, PartitionMeta, SignedHeader,
+    Ticket, TicketLimit, TmdHeader, WindowedStream, BI2_SIZE, BOOT_SIZE, DL_DVD_SIZE, GCN_MAGIC,
     MINI_DVD_SIZE, REGION_SIZE, SECTOR_SIZE, SL_DVD_SIZE, WII_MAGIC,
 };
 pub use io::{
@@ -150,13 +150,46 @@ where E: ErrorContext
     }
 }
 
+/// Wii partition encryption mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PartitionEncryptionMode {
+    /// Partition data is read as it's stored in the underlying disc format.
+    /// For example, WIA/RVZ partitions are stored decrypted, so this avoids
+    /// rebuilding the partition encryption and hash data if it will only be
+    /// read via [`PartitionBase`]. If it's desired to read a full disc image
+    /// via [`Disc`], use [`PartitionEncryptionMode::Original`] instead.
+    #[default]
+    AsIs,
+    /// Partition encryption and hashes are rebuilt to match its original state,
+    /// if necessary. This is used for converting or verifying a disc image.
+    Original,
+    /// Partition data will be encrypted if reading a decrypted disc image.
+    /// Modifies the disc header to mark partition data as encrypted.
+    ForceEncrypted,
+    /// Partition data will be decrypted if reading an encrypted disc image.
+    /// Modifies the disc header to mark partition data as decrypted.
+    ForceDecrypted,
+}
+
 /// Options for opening a disc image.
 #[derive(Default, Debug, Clone)]
 pub struct OpenOptions {
-    /// Wii: Rebuild partition data encryption and hashes if the underlying format stores data
-    /// decrypted or with hashes removed. (e.g. WIA/RVZ, NFS)
-    pub rebuild_encryption: bool,
-    /// Wii: Validate partition data hashes while reading the disc image.
+    /// Wii: Partition encryption mode. By default, partitions are read as they
+    /// are stored in the underlying disc format, avoiding extra work when the
+    /// underlying format stores them decrypted (e.g. WIA/RVZ).
+    ///
+    /// This can be changed to [`PartitionEncryptionMode::Original`] to rebuild
+    /// partition encryption and hashes to match its original state for conversion
+    /// or verification.
+    pub partition_encryption: PartitionEncryptionMode,
+}
+
+/// Options for opening a partition.
+#[derive(Default, Debug, Clone)]
+pub struct PartitionOptions {
+    /// Wii: Validate data hashes while reading the partition, if available.
+    /// To ensure hashes are present, regardless of the underlying disc format,
+    /// set [`OpenOptions::partition_encryption`] to [`PartitionEncryptionMode::Original`].
     pub validate_hashes: bool,
 }
 
@@ -165,7 +198,6 @@ pub struct OpenOptions {
 /// This is the primary entry point for reading disc images.
 pub struct Disc {
     reader: disc::reader::DiscReader,
-    options: OpenOptions,
 }
 
 impl Disc {
@@ -180,7 +212,7 @@ impl Disc {
     pub fn new_with_options<P: AsRef<Path>>(path: P, options: &OpenOptions) -> Result<Disc> {
         let io = io::block::open(path.as_ref())?;
         let reader = disc::reader::DiscReader::new(io, options)?;
-        Ok(Disc { reader, options: options.clone() })
+        Ok(Disc { reader })
     }
 
     /// Opens a disc image from a read stream.
@@ -197,7 +229,7 @@ impl Disc {
     ) -> Result<Disc> {
         let io = io::block::new(stream)?;
         let reader = disc::reader::DiscReader::new(io, options)?;
-        Ok(Disc { reader, options: options.clone() })
+        Ok(Disc { reader })
     }
 
     /// Detects the format of a disc image from a read stream.
@@ -236,7 +268,20 @@ impl Disc {
     /// **GameCube**: `index` must always be 0.
     #[inline]
     pub fn open_partition(&self, index: usize) -> Result<Box<dyn PartitionBase>> {
-        self.reader.open_partition(index, &self.options)
+        self.open_partition_with_options(index, &PartitionOptions::default())
+    }
+
+    /// Opens a decrypted partition read stream for the specified partition index
+    /// with custom options.
+    ///
+    /// **GameCube**: `index` must always be 0.
+    #[inline]
+    pub fn open_partition_with_options(
+        &self,
+        index: usize,
+        options: &PartitionOptions,
+    ) -> Result<Box<dyn PartitionBase>> {
+        self.reader.open_partition(index, options)
     }
 
     /// Opens a decrypted partition read stream for the first partition matching
@@ -245,7 +290,20 @@ impl Disc {
     /// **GameCube**: `kind` must always be [`PartitionKind::Data`].
     #[inline]
     pub fn open_partition_kind(&self, kind: PartitionKind) -> Result<Box<dyn PartitionBase>> {
-        self.reader.open_partition_kind(kind, &self.options)
+        self.reader.open_partition_kind(kind, &PartitionOptions::default())
+    }
+
+    /// Opens a decrypted partition read stream for the first partition matching
+    /// the specified kind with custom options.
+    ///
+    /// **GameCube**: `kind` must always be [`PartitionKind::Data`].
+    #[inline]
+    pub fn open_partition_kind_with_options(
+        &self,
+        kind: PartitionKind,
+        options: &PartitionOptions,
+    ) -> Result<Box<dyn PartitionBase>> {
+        self.reader.open_partition_kind(kind, options)
     }
 }
 

@@ -16,13 +16,13 @@ use crate::{
     array_ref,
     disc::streams::OwnedFileStream,
     io::{
-        aes_decrypt,
+        aes_cbc_decrypt,
         block::{Block, BlockIO, PartitionInfo},
-        KeyBytes,
+        HashBytes, KeyBytes,
     },
     static_assert,
     util::{div_rem, read::read_box_slice},
-    Error, OpenOptions, Result, ResultContext,
+    Error, PartitionOptions, Result, ResultContext,
 };
 
 /// Size in bytes of the hashes block in a Wii disc sector
@@ -179,7 +179,7 @@ impl Ticket {
             format!("unknown common key index {}", self.common_key_idx),
         ))?;
         let mut title_key = self.title_key;
-        aes_decrypt(common_key, iv, &mut title_key);
+        aes_cbc_decrypt(common_key, &iv, &mut title_key);
         Ok(title_key)
     }
 }
@@ -231,6 +231,24 @@ pub struct TmdHeader {
 
 static_assert!(size_of::<TmdHeader>() == 0x1E4);
 
+/// TMD content metadata
+#[derive(Clone, Debug, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
+#[repr(C, align(4))]
+pub struct ContentMetadata {
+    /// Content ID
+    pub content_id: U32,
+    /// Content index
+    pub content_index: U16,
+    /// Content type
+    pub content_type: U16,
+    /// Content size
+    pub size: U64,
+    /// Content hash
+    pub hash: HashBytes,
+}
+
+static_assert!(size_of::<ContentMetadata>() == 0x24);
+
 pub const H3_TABLE_SIZE: usize = 0x18000;
 
 #[derive(Debug, Clone, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
@@ -275,10 +293,10 @@ pub struct PartitionWii {
     sector_buf: Box<[u8; SECTOR_SIZE]>,
     sector: u32,
     pos: u64,
-    verify: bool,
-    raw_tmd: Box<[u8]>,
-    raw_cert_chain: Box<[u8]>,
-    raw_h3_table: Box<[u8]>,
+    options: PartitionOptions,
+    raw_tmd: Option<Box<[u8]>>,
+    raw_cert_chain: Option<Box<[u8]>>,
+    raw_h3_table: Option<Box<[u8]>>,
 }
 
 impl Clone for PartitionWii {
@@ -292,7 +310,7 @@ impl Clone for PartitionWii {
             sector_buf: <[u8; SECTOR_SIZE]>::new_box_zeroed().unwrap(),
             sector: u32::MAX,
             pos: 0,
-            verify: self.verify,
+            options: self.options.clone(),
             raw_tmd: self.raw_tmd.clone(),
             raw_cert_chain: self.raw_cert_chain.clone(),
             raw_h3_table: self.raw_h3_table.clone(),
@@ -305,29 +323,43 @@ impl PartitionWii {
         inner: Box<dyn BlockIO>,
         disc_header: Box<DiscHeader>,
         partition: &PartitionInfo,
-        options: &OpenOptions,
+        options: &PartitionOptions,
     ) -> Result<Box<Self>> {
         let block_size = inner.block_size();
         let mut reader = PartitionGC::new(inner, disc_header)?;
 
         // Read TMD, cert chain, and H3 table
         let offset = partition.start_sector as u64 * SECTOR_SIZE as u64;
-        reader
-            .seek(SeekFrom::Start(offset + partition.header.tmd_off()))
-            .context("Seeking to TMD offset")?;
-        let raw_tmd: Box<[u8]> = read_box_slice(&mut reader, partition.header.tmd_size() as usize)
-            .context("Reading TMD")?;
-        reader
-            .seek(SeekFrom::Start(offset + partition.header.cert_chain_off()))
-            .context("Seeking to cert chain offset")?;
-        let raw_cert_chain: Box<[u8]> =
-            read_box_slice(&mut reader, partition.header.cert_chain_size() as usize)
-                .context("Reading cert chain")?;
-        reader
-            .seek(SeekFrom::Start(offset + partition.header.h3_table_off()))
-            .context("Seeking to H3 table offset")?;
-        let raw_h3_table: Box<[u8]> =
-            read_box_slice(&mut reader, H3_TABLE_SIZE).context("Reading H3 table")?;
+        let raw_tmd = if partition.header.tmd_size() != 0 {
+            reader
+                .seek(SeekFrom::Start(offset + partition.header.tmd_off()))
+                .context("Seeking to TMD offset")?;
+            Some(
+                read_box_slice::<u8, _>(&mut reader, partition.header.tmd_size() as usize)
+                    .context("Reading TMD")?,
+            )
+        } else {
+            None
+        };
+        let raw_cert_chain = if partition.header.cert_chain_size() != 0 {
+            reader
+                .seek(SeekFrom::Start(offset + partition.header.cert_chain_off()))
+                .context("Seeking to cert chain offset")?;
+            Some(
+                read_box_slice::<u8, _>(&mut reader, partition.header.cert_chain_size() as usize)
+                    .context("Reading cert chain")?,
+            )
+        } else {
+            None
+        };
+        let raw_h3_table = if partition.has_hashes {
+            reader
+                .seek(SeekFrom::Start(offset + partition.header.h3_table_off()))
+                .context("Seeking to H3 table offset")?;
+            Some(read_box_slice::<u8, _>(&mut reader, H3_TABLE_SIZE).context("Reading H3 table")?)
+        } else {
+            None
+        };
 
         Ok(Box::new(Self {
             io: reader.into_inner(),
@@ -338,7 +370,7 @@ impl PartitionWii {
             sector_buf: <[u8; SECTOR_SIZE]>::new_box_zeroed()?,
             sector: u32::MAX,
             pos: 0,
-            verify: options.validate_hashes,
+            options: options.clone(),
             raw_tmd,
             raw_cert_chain,
             raw_h3_table,
@@ -348,37 +380,60 @@ impl PartitionWii {
 
 impl BufRead for PartitionWii {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        let part_sector = (self.pos / SECTOR_DATA_SIZE as u64) as u32;
+        let part_sector = if self.partition.has_hashes {
+            (self.pos / SECTOR_DATA_SIZE as u64) as u32
+        } else {
+            (self.pos / SECTOR_SIZE as u64) as u32
+        };
         let abs_sector = self.partition.data_start_sector + part_sector;
         if abs_sector >= self.partition.data_end_sector {
             return Ok(&[]);
         }
-        let block_idx =
-            (abs_sector as u64 * SECTOR_SIZE as u64 / self.block_buf.len() as u64) as u32;
 
         // Read new block if necessary
+        let block_idx =
+            (abs_sector as u64 * SECTOR_SIZE as u64 / self.block_buf.len() as u64) as u32;
         if block_idx != self.block_idx {
-            self.block =
-                self.io.read_block(self.block_buf.as_mut(), block_idx, Some(&self.partition))?;
+            self.block = self.io.read_block(
+                self.block_buf.as_mut(),
+                block_idx,
+                self.partition.has_encryption.then_some(&self.partition),
+            )?;
             self.block_idx = block_idx;
         }
 
         // Decrypt sector if necessary
         if abs_sector != self.sector {
-            self.block.decrypt(
-                self.sector_buf.as_mut(),
-                self.block_buf.as_ref(),
-                abs_sector,
-                &self.partition,
-            )?;
-            if self.verify {
-                verify_hashes(self.sector_buf.as_ref(), part_sector, self.raw_h3_table.as_ref())?;
+            if self.partition.has_encryption {
+                self.block.decrypt(
+                    self.sector_buf.as_mut(),
+                    self.block_buf.as_ref(),
+                    abs_sector,
+                    &self.partition,
+                )?;
+            } else {
+                self.block.copy_raw(
+                    self.sector_buf.as_mut(),
+                    self.block_buf.as_ref(),
+                    abs_sector,
+                    &self.partition.disc_header,
+                )?;
+            }
+            if self.options.validate_hashes {
+                if let Some(h3_table) = self.raw_h3_table.as_deref() {
+                    verify_hashes(self.sector_buf.as_ref(), part_sector, h3_table)?;
+                }
             }
             self.sector = abs_sector;
         }
 
-        let offset = (self.pos % SECTOR_DATA_SIZE as u64) as usize;
-        Ok(&self.sector_buf[HASHES_SIZE + offset..])
+        if self.partition.has_hashes {
+            let offset = (self.pos % SECTOR_DATA_SIZE as u64) as usize;
+            Ok(&self.sector_buf[HASHES_SIZE + offset..])
+        } else {
+            let offset = (self.pos % SECTOR_SIZE as u64) as usize;
+            Ok(&self.sector_buf[offset..])
+        }
     }
 
     #[inline]
@@ -489,9 +544,9 @@ impl PartitionBase for PartitionWii {
         self.seek(SeekFrom::Start(0)).context("Seeking to partition header")?;
         let mut meta = read_part_meta(self, true)?;
         meta.raw_ticket = Some(Box::from(self.partition.header.ticket.as_bytes()));
-        meta.raw_tmd = Some(self.raw_tmd.clone());
-        meta.raw_cert_chain = Some(self.raw_cert_chain.clone());
-        meta.raw_h3_table = Some(self.raw_h3_table.clone());
+        meta.raw_tmd = self.raw_tmd.clone();
+        meta.raw_cert_chain = self.raw_cert_chain.clone();
+        meta.raw_h3_table = self.raw_h3_table.clone();
         Ok(meta)
     }
 

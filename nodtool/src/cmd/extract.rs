@@ -9,7 +9,8 @@ use std::{
 use argp::FromArgs;
 use itertools::Itertools;
 use nod::{
-    Disc, Fst, Node, OpenOptions, PartitionBase, PartitionKind, PartitionMeta, ResultContext,
+    Disc, Fst, Node, OpenOptions, PartitionBase, PartitionKind, PartitionMeta, PartitionOptions,
+    ResultContext,
 };
 use size::{Base, Size};
 use zerocopy::IntoBytes;
@@ -52,36 +53,39 @@ pub fn run(args: Args) -> nod::Result<()> {
     } else {
         output_dir = args.file.with_extension("");
     }
-    let disc = Disc::new_with_options(&args.file, &OpenOptions {
-        rebuild_encryption: false,
-        validate_hashes: args.validate,
-    })?;
+    let disc = Disc::new_with_options(&args.file, &OpenOptions::default())?;
     let header = disc.header();
     let is_wii = header.is_wii();
+    let partition_options = PartitionOptions { validate_hashes: args.validate };
     if let Some(partition) = args.partition {
         if partition.eq_ignore_ascii_case("all") {
             for info in disc.partitions() {
                 let mut out_dir = output_dir.clone();
                 out_dir.push(info.kind.dir_name().as_ref());
-                let mut partition = disc.open_partition(info.index)?;
+                let mut partition =
+                    disc.open_partition_with_options(info.index, &partition_options)?;
                 extract_partition(&disc, partition.as_mut(), &out_dir, is_wii, args.quiet)?;
             }
         } else if partition.eq_ignore_ascii_case("data") {
-            let mut partition = disc.open_partition_kind(PartitionKind::Data)?;
+            let mut partition =
+                disc.open_partition_kind_with_options(PartitionKind::Data, &partition_options)?;
             extract_partition(&disc, partition.as_mut(), &output_dir, is_wii, args.quiet)?;
         } else if partition.eq_ignore_ascii_case("update") {
-            let mut partition = disc.open_partition_kind(PartitionKind::Update)?;
+            let mut partition =
+                disc.open_partition_kind_with_options(PartitionKind::Update, &partition_options)?;
             extract_partition(&disc, partition.as_mut(), &output_dir, is_wii, args.quiet)?;
         } else if partition.eq_ignore_ascii_case("channel") {
-            let mut partition = disc.open_partition_kind(PartitionKind::Channel)?;
+            let mut partition =
+                disc.open_partition_kind_with_options(PartitionKind::Channel, &partition_options)?;
             extract_partition(&disc, partition.as_mut(), &output_dir, is_wii, args.quiet)?;
         } else {
             let idx = partition.parse::<usize>().map_err(|_| "Invalid partition index")?;
-            let mut partition = disc.open_partition(idx)?;
+            let mut partition = disc.open_partition_with_options(idx, &partition_options)?;
             extract_partition(&disc, partition.as_mut(), &output_dir, is_wii, args.quiet)?;
         }
     } else {
-        let mut partition = disc.open_partition_kind(PartitionKind::Data)?;
+        let mut partition =
+            disc.open_partition_kind_with_options(PartitionKind::Data, &partition_options)?;
         extract_partition(&disc, partition.as_mut(), &output_dir, is_wii, args.quiet)?;
     }
     Ok(())

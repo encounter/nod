@@ -97,7 +97,7 @@ impl BlockIO for DiscIOWBFS {
         &mut self,
         out: &mut [u8],
         block: u32,
-        _partition: Option<&PartitionInfo>,
+        partition: Option<&PartitionInfo>,
     ) -> io::Result<Block> {
         let block_size = self.header.block_size();
         if block >= self.header.max_blocks() {
@@ -120,7 +120,11 @@ impl BlockIO for DiscIOWBFS {
         let block_start = block_size as u64 * phys_block as u64;
         self.inner.seek(SeekFrom::Start(block_start))?;
         self.inner.read_exact(out)?;
-        Ok(Block::Raw)
+
+        match partition {
+            Some(partition) if partition.has_encryption => Ok(Block::PartEncrypted),
+            _ => Ok(Block::Raw),
+        }
     }
 
     fn block_size_internal(&self) -> u32 { self.header.block_size() }

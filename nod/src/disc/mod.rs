@@ -24,7 +24,7 @@ pub(crate) mod wii;
 
 pub use fst::{Fst, Node, NodeKind};
 pub use streams::{FileStream, OwnedFileStream, WindowedStream};
-pub use wii::{SignedHeader, Ticket, TicketLimit, TmdHeader, REGION_SIZE};
+pub use wii::{ContentMetadata, SignedHeader, Ticket, TicketLimit, TmdHeader, REGION_SIZE};
 
 /// Size in bytes of a disc sector. (32 KiB)
 pub const SECTOR_SIZE: usize = 0x8000;
@@ -90,6 +90,14 @@ impl DiscHeader {
     /// Whether this is a Wii disc.
     #[inline]
     pub fn is_wii(&self) -> bool { self.wii_magic == WII_MAGIC }
+
+    /// Whether the disc has partition data hashes.
+    #[inline]
+    pub fn has_partition_hashes(&self) -> bool { self.no_partition_hashes == 0 }
+
+    /// Whether the disc has partition data encryption.
+    #[inline]
+    pub fn has_partition_encryption(&self) -> bool { self.no_partition_encryption == 0 }
 }
 
 /// A header describing the contents of a disc partition.
@@ -379,19 +387,23 @@ impl PartitionMeta {
     /// A view into the disc header.
     #[inline]
     pub fn header(&self) -> &DiscHeader {
-        DiscHeader::ref_from_bytes(&self.raw_boot[..size_of::<DiscHeader>()]).unwrap()
+        DiscHeader::ref_from_bytes(&self.raw_boot[..size_of::<DiscHeader>()])
+            .expect("Invalid header alignment")
     }
 
     /// A view into the partition header.
     #[inline]
     pub fn partition_header(&self) -> &PartitionHeader {
-        PartitionHeader::ref_from_bytes(&self.raw_boot[size_of::<DiscHeader>()..]).unwrap()
+        PartitionHeader::ref_from_bytes(&self.raw_boot[size_of::<DiscHeader>()..])
+            .expect("Invalid partition header alignment")
     }
 
     /// A view into the apploader header.
     #[inline]
     pub fn apploader_header(&self) -> &ApploaderHeader {
-        ApploaderHeader::ref_from_prefix(&self.raw_apploader).unwrap().0
+        ApploaderHeader::ref_from_prefix(&self.raw_apploader)
+            .expect("Invalid apploader alignment")
+            .0
     }
 
     /// A view into the file system table (FST).
@@ -400,18 +412,29 @@ impl PartitionMeta {
 
     /// A view into the DOL header.
     #[inline]
-    pub fn dol_header(&self) -> &DolHeader { DolHeader::ref_from_prefix(&self.raw_dol).unwrap().0 }
+    pub fn dol_header(&self) -> &DolHeader {
+        DolHeader::ref_from_prefix(&self.raw_dol).expect("Invalid DOL alignment").0
+    }
 
     /// A view into the ticket. (Wii only)
     #[inline]
     pub fn ticket(&self) -> Option<&Ticket> {
-        self.raw_ticket.as_ref().and_then(|v| Ticket::ref_from_bytes(v).ok())
+        let raw_ticket = self.raw_ticket.as_deref()?;
+        Some(Ticket::ref_from_bytes(raw_ticket).expect("Invalid ticket alignment"))
     }
 
     /// A view into the TMD. (Wii only)
     #[inline]
     pub fn tmd_header(&self) -> Option<&TmdHeader> {
-        self.raw_tmd.as_ref().and_then(|v| TmdHeader::ref_from_prefix(v).ok().map(|(v, _)| v))
+        let raw_tmd = self.raw_tmd.as_deref()?;
+        Some(TmdHeader::ref_from_prefix(raw_tmd).expect("Invalid TMD alignment").0)
+    }
+
+    /// A view into the TMD content metadata. (Wii only)
+    #[inline]
+    pub fn content_metadata(&self) -> Option<&[ContentMetadata]> {
+        let raw_cmd = &self.raw_tmd.as_deref()?[size_of::<TmdHeader>()..];
+        Some(<[ContentMetadata]>::ref_from_bytes(raw_cmd).expect("Invalid CMD alignment"))
     }
 }
 

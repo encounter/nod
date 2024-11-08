@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use argp::FromArgs;
+use nod::{OpenOptions, PartitionEncryptionMode};
 
 use crate::util::{redump, shared::convert_and_verify};
 
@@ -24,8 +25,9 @@ pub fn run(args: Args) -> nod::Result<()> {
         println!("Loading dat files...");
         redump::load_dats(args.dat.iter().map(PathBuf::as_ref))?;
     }
+    let options = OpenOptions { partition_encryption: PartitionEncryptionMode::Original };
     for file in &args.file {
-        convert_and_verify(file, None, args.md5)?;
+        convert_and_verify(file, None, args.md5, &options)?;
         println!();
     }
     Ok(())

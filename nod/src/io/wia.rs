@@ -8,7 +8,7 @@ use zerocopy::{big_endian::*, FromBytes, Immutable, IntoBytes, KnownLayout};
 
 use crate::{
     disc::{
-        hashes::hash_bytes,
+        hashes::sha1_hash,
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         SECTOR_SIZE,
     },
@@ -530,7 +530,7 @@ impl Clone for DiscIOWIA {
 }
 
 fn verify_hash(buf: &[u8], expected: &HashBytes) -> Result<()> {
-    let out = hash_bytes(buf);
+    let out = sha1_hash(buf);
     if out != *expected {
         let mut got_bytes = [0u8; 40];
         let got = base16ct::lower::encode_str(&out, &mut got_bytes).unwrap(); // Safe: fixed buffer size
@@ -684,7 +684,10 @@ impl BlockIO for DiscIOWIA {
         let chunk_size = self.disc.chunk_size.get();
         let sectors_per_chunk = chunk_size / SECTOR_SIZE as u32;
 
-        let (group_index, group_sector, partition_offset) = if let Some(partition) = partition {
+        let in_partition = partition.is_some_and(|info| info.has_encryption);
+        let (group_index, group_sector, partition_offset) = if in_partition {
+            let partition = partition.unwrap();
+
             // Find the partition
             let Some(wia_part) = self.partitions.get(partition.index) else {
                 return Err(io::Error::new(
@@ -783,7 +786,7 @@ impl BlockIO for DiscIOWIA {
 
         // Read group data if necessary
         if group_index != self.group {
-            let group_data_size = if partition.is_some() {
+            let group_data_size = if in_partition {
                 // Within a partition, hashes are excluded from the data size
                 (sectors_per_chunk * SECTOR_DATA_SIZE as u32) as usize
             } else {
@@ -798,11 +801,8 @@ impl BlockIO for DiscIOWIA {
                 matches!(self.disc.compression(), WIACompression::None | WIACompression::Purge)
                     || !group.is_compressed();
             if uncompressed_exception_lists {
-                self.exception_lists = read_exception_lists(
-                    &mut reader,
-                    partition.is_some(),
-                    self.disc.chunk_size.get(),
-                )?;
+                self.exception_lists =
+                    read_exception_lists(&mut reader, in_partition, self.disc.chunk_size.get())?;
                 // Align to 4
                 let rem = reader.stream_position()? % 4;
                 if rem != 0 {
@@ -817,7 +817,7 @@ impl BlockIO for DiscIOWIA {
             if !uncompressed_exception_lists {
                 self.exception_lists = read_exception_lists(
                     reader.as_mut(),
-                    partition.is_some(),
+                    in_partition,
                     self.disc.chunk_size.get(),
                 )?;
             }
@@ -861,7 +861,7 @@ impl BlockIO for DiscIOWIA {
         }
 
         // Read sector from cached group data
-        if partition.is_some() {
+        if in_partition {
             let sector_data_start = group_sector as usize * SECTOR_DATA_SIZE;
             out[..HASHES_SIZE].fill(0);
             out[HASHES_SIZE..SECTOR_SIZE].copy_from_slice(

@@ -124,19 +124,19 @@ pub struct DiscMeta {
 }
 
 /// Encrypts data in-place using AES-128-CBC with the given key and IV.
-#[inline(always)]
-pub(crate) fn aes_encrypt(key: &KeyBytes, iv: KeyBytes, data: &mut [u8]) {
+/// Requires the data length to be a multiple of the AES block size (16 bytes).
+pub fn aes_cbc_encrypt(key: &KeyBytes, iv: &KeyBytes, data: &mut [u8]) {
     use aes::cipher::{block_padding::NoPadding, BlockEncryptMut, KeyIvInit};
-    <cbc::Encryptor<aes::Aes128>>::new(key.into(), &aes::Block::from(iv))
+    <cbc::Encryptor<aes::Aes128>>::new(key.into(), iv.into())
         .encrypt_padded_mut::<NoPadding>(data, data.len())
-        .unwrap(); // Safe: using NoPadding
+        .unwrap();
 }
 
 /// Decrypts data in-place using AES-128-CBC with the given key and IV.
-#[inline(always)]
-pub(crate) fn aes_decrypt(key: &KeyBytes, iv: KeyBytes, data: &mut [u8]) {
+/// Requires the data length to be a multiple of the AES block size (16 bytes).
+pub fn aes_cbc_decrypt(key: &KeyBytes, iv: &KeyBytes, data: &mut [u8]) {
     use aes::cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
-    <cbc::Decryptor<aes::Aes128>>::new(key.into(), &aes::Block::from(iv))
+    <cbc::Decryptor<aes::Aes128>>::new(key.into(), iv.into())
         .decrypt_padded_mut::<NoPadding>(data)
-        .unwrap(); // Safe: using NoPadding
+        .unwrap();
 }

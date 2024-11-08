@@ -10,7 +10,7 @@ use std::{
 
 use argp::FromArgs;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
-use nod::{Disc, OpenOptions, Result, ResultContext};
+use nod::{Disc, OpenOptions, PartitionEncryptionMode, Result, ResultContext};
 use zerocopy::FromZeros;
 
 use crate::util::{
@@ -165,10 +165,8 @@ struct DiscHashes {
 }
 
 fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
-    let mut disc = Disc::new_with_options(path, &OpenOptions {
-        rebuild_encryption: true,
-        validate_hashes: false,
-    })?;
+    let options = OpenOptions { partition_encryption: PartitionEncryptionMode::Original };
+    let mut disc = Disc::new_with_options(path, &options)?;
     let disc_size = disc.disc_size();
     if !full_verify {
         let meta = disc.meta();

@@ -38,20 +38,22 @@ pub fn print_header(header: &DiscHeader, meta: &DiscMeta) {
     println!("Title: {}", header.game_title_str());
     println!("Game ID: {}", header.game_id_str());
     println!("Disc {}, Revision {}", header.disc_num + 1, header.disc_version);
-    if header.no_partition_hashes != 0 {
+    if !header.has_partition_hashes() {
         println!("[!] Disc has no hashes");
     }
-    if header.no_partition_encryption != 0 {
+    if !header.has_partition_encryption() {
         println!("[!] Disc is not encrypted");
     }
 }
 
-pub fn convert_and_verify(in_file: &Path, out_file: Option<&Path>, md5: bool) -> Result<()> {
+pub fn convert_and_verify(
+    in_file: &Path,
+    out_file: Option<&Path>,
+    md5: bool,
+    options: &OpenOptions,
+) -> Result<()> {
     println!("Loading {}", display(in_file));
-    let mut disc = Disc::new_with_options(in_file, &OpenOptions {
-        rebuild_encryption: true,
-        validate_hashes: false,
-    })?;
+    let mut disc = Disc::new_with_options(in_file, options)?;
     let header = disc.header();
     let meta = disc.meta();
     print_header(header, &meta);

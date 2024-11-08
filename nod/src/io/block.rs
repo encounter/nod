@@ -15,7 +15,8 @@ use crate::{
         DiscHeader, PartitionHeader, PartitionKind, GCN_MAGIC, SECTOR_SIZE, WII_MAGIC,
     },
     io::{
-        aes_decrypt, aes_encrypt, split::SplitFileReader, DiscMeta, Format, KeyBytes, MagicBytes,
+        aes_cbc_decrypt, aes_cbc_encrypt, split::SplitFileReader, DiscMeta, Format, KeyBytes,
+        MagicBytes,
     },
     util::{lfg::LaggedFibonacci, read::read_from},
     Error, Result, ResultContext,
@@ -218,9 +219,9 @@ pub struct PartitionInfo {
     pub kind: PartitionKind,
     /// The start sector of the partition.
     pub start_sector: u32,
-    /// The start sector of the partition's (encrypted) data.
+    /// The start sector of the partition's data.
     pub data_start_sector: u32,
-    /// The end sector of the partition's (encrypted) data.
+    /// The end sector of the partition's data.
     pub data_end_sector: u32,
     /// The AES key for the partition, also known as the "title key".
     pub key: KeyBytes,
@@ -232,6 +233,10 @@ pub struct PartitionInfo {
     pub partition_header: Box<PartitionHeader>,
     /// The hash table for the partition, if rebuilt.
     pub hash_table: Option<HashTable>,
+    /// Whether the partition data is encrypted
+    pub has_encryption: bool,
+    /// Whether the partition data hashes are present
+    pub has_hashes: bool,
 }
 
 /// The block kind returned by [`BlockIO::read_block`].
@@ -239,6 +244,8 @@ pub struct PartitionInfo {
 pub enum Block {
     /// Raw data or encrypted Wii partition data
     Raw,
+    /// Encrypted Wii partition data
+    PartEncrypted,
     /// Decrypted Wii partition data
     PartDecrypted {
         /// Whether the sector has its hash block intact
@@ -263,6 +270,9 @@ impl Block {
         let part_sector = abs_sector - partition.data_start_sector;
         match self {
             Block::Raw => {
+                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
+            }
+            Block::PartEncrypted => {
                 out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
                 decrypt_sector(out, partition);
             }
@@ -296,6 +306,10 @@ impl Block {
         match self {
             Block::Raw => {
                 out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
+                encrypt_sector(out, partition);
+            }
+            Block::PartEncrypted => {
+                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
             }
             Block::PartDecrypted { has_hashes } => {
                 out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
@@ -327,14 +341,8 @@ impl Block {
         disc_header: &DiscHeader,
     ) -> io::Result<()> {
         match self {
-            Block::Raw => {
+            Block::Raw | Block::PartEncrypted | Block::PartDecrypted { .. } => {
                 out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
-            }
-            Block::PartDecrypted { .. } => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Cannot copy decrypted data as raw",
-                ));
             }
             Block::Junk => generate_junk(out, abs_sector, None, disc_header),
             Block::Zero => out.fill(0),
@@ -406,15 +414,15 @@ fn rebuild_hash_block(out: &mut [u8; SECTOR_SIZE], part_sector: u32, partition: 
 }
 
 fn encrypt_sector(out: &mut [u8; SECTOR_SIZE], partition: &PartitionInfo) {
-    aes_encrypt(&partition.key, [0u8; 16], &mut out[..HASHES_SIZE]);
+    aes_cbc_encrypt(&partition.key, &[0u8; 16], &mut out[..HASHES_SIZE]);
     // Data IV from encrypted hash block
     let iv = *array_ref![out, 0x3D0, 16];
-    aes_encrypt(&partition.key, iv, &mut out[HASHES_SIZE..]);
+    aes_cbc_encrypt(&partition.key, &iv, &mut out[HASHES_SIZE..]);
 }
 
 fn decrypt_sector(out: &mut [u8; SECTOR_SIZE], partition: &PartitionInfo) {
     // Data IV from encrypted hash block
     let iv = *array_ref![out, 0x3D0, 16];
-    aes_decrypt(&partition.key, [0u8; 16], &mut out[..HASHES_SIZE]);
-    aes_decrypt(&partition.key, iv, &mut out[HASHES_SIZE..]);
+    aes_cbc_decrypt(&partition.key, &[0u8; 16], &mut out[..HASHES_SIZE]);
+    aes_cbc_decrypt(&partition.key, &iv, &mut out[HASHES_SIZE..]);
 }
