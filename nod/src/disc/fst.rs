@@ -182,8 +182,7 @@ impl<'a> Fst<'a> {
         let mut idx = 1;
         let mut stop_at = None;
         while let Some(node) = self.nodes.get(idx).copied() {
-            if self.get_name(node).as_ref().map_or(false, |name| name.eq_ignore_ascii_case(current))
-            {
+            if self.get_name(node).as_ref().is_ok_and(|name| name.eq_ignore_ascii_case(current)) {
                 current = next_non_empty(&mut split);
                 if current.is_empty() {
                     return Some((idx, node));
@@ -221,7 +220,7 @@ pub struct FstIter<'a> {
     segments: Vec<(Cow<'a, str>, usize)>,
 }
 
-impl<'a> Iterator for FstIter<'a> {
+impl Iterator for FstIter<'_> {
     type Item = (usize, Node, String);
 
     fn next(&mut self) -> Option<Self::Item> {

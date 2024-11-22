@@ -134,7 +134,7 @@ pub fn load_dats<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<()> {
     for (entry, name) in &mut entries {
         entry.string_table_offset = string_table_offset;
         out.write_all(entry.as_bytes()).unwrap();
-        string_table_offset += name.as_bytes().len() as u32 + 4;
+        string_table_offset += name.len() as u32 + 4;
     }
 
     // Write string table

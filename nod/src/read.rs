@@ -212,7 +212,7 @@ pub type FileReader<'a> = WindowedReader<&'a mut dyn PartitionReader>;
 /// A file reader owning a [`PartitionReader`].
 pub type OwnedFileReader = WindowedReader<Box<dyn PartitionReader>>;
 
-impl<'a> dyn PartitionReader + 'a {
+impl dyn PartitionReader + '_ {
     /// Seeks the partition stream to the specified file system node
     /// and returns a windowed stream.
     ///
