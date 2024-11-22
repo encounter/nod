@@ -9,7 +9,7 @@ repository.workspace = true
 documentation = "https://docs.rs/nodtool"
 readme = "../README.md"
 description = """
-CLI tool for verifying and converting GameCube and Wii disc images.
+CLI tool for extracting and converting GameCube and Wii disc images.
 """
 keywords.workspace = true
 categories = ["command-line-utilities", "parser-implementations"]

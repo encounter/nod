@@ -8,10 +8,10 @@
 [rustdoc]: https://docs.rs/nod
 [Rust Version]: https://img.shields.io/badge/rust-1.81+-blue.svg?maxAge=3600
 
-Library for traversing & reading Nintendo Optical Disc (GameCube and Wii) images.
+Library for reading and writing Nintendo Optical Disc (GameCube and Wii) images.
 
 Originally based on the C++ library [nod](https://github.com/AxioDL/nod),
-but does not currently support authoring.
+but with extended format support and many additional features.
 
 Currently supported file formats:
 
@@ -19,7 +19,7 @@ Currently supported file formats:
 - WIA / RVZ
 - WBFS (+ NKit 2 lossless)
 - CISO (+ NKit 2 lossless)
-- NFS (Wii U VC)
+- NFS (Wii U VC, read-only)
 - GCZ
 - TGC
 
@@ -58,15 +58,17 @@ nodtool extract /path/to/game/content/hif_000000.nfs [outdir]
 
 ### convert
 
-Converts any supported format to raw ISO.
+Converts a disc image to any supported format.
+
+See `nodtool convert --help` for more information.
 
 ```shell
-nodtool convert /path/to/game.wia /path/to/game.iso
+nodtool convert /path/to/game.iso /path/to/game.rvz
 ```
 
 ### verify
 
-Hashes the contents of a disc image and verifies it.
+Verifies a disc image against an internal Redump database.
 
 ```shell
 nodtool verify /path/to/game.iso

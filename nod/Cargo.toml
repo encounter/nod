@@ -9,7 +9,7 @@ repository.workspace = true
 documentation = "https://docs.rs/nod"
 readme = "../README.md"
 description = """
-Library for reading GameCube and Wii disc images.
+Library for reading and writing GameCube and Wii disc images.
 """
 keywords.workspace = true
 categories = ["command-line-utilities", "parser-implementations"]
