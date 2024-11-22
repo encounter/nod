@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use argp::FromArgs;
-use nod::{Disc, SECTOR_SIZE};
+use nod::{
+    disc::SECTOR_SIZE,
+    read::{DiscOptions, DiscReader, PartitionOptions},
+};
 use size::Size;
+use tracing::info;
 
-use crate::util::{display, shared::print_header};
+use crate::util::{path_display, shared::print_header};
 
 #[derive(FromArgs, Debug)]
 /// Displays information about disc images.
@@ -23,15 +27,15 @@ pub fn run(args: Args) -> nod::Result<()> {
 }
 
 fn info_file(path: &Path) -> nod::Result<()> {
-    log::info!("Loading {}", display(path));
-    let disc = Disc::new(path)?;
+    info!("Loading {}", path_display(path));
+    let disc = DiscReader::new(path, &DiscOptions::default())?;
     let header = disc.header();
     let meta = disc.meta();
     print_header(header, &meta);
 
     if header.is_wii() {
         for (idx, info) in disc.partitions().iter().enumerate() {
-            let mut partition = disc.open_partition(idx)?;
+            let mut partition = disc.open_partition(idx, &PartitionOptions::default())?;
             let meta = partition.meta()?;
 
             println!();

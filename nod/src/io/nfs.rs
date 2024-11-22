@@ -4,22 +4,21 @@ use std::{
     io::{BufReader, Read, Seek, SeekFrom},
     mem::size_of,
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 use zerocopy::{big_endian::U32, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
 use crate::{
-    array_ref_mut,
+    common::{Format, KeyBytes, MagicBytes},
     disc::SECTOR_SIZE,
     io::{
-        aes_cbc_decrypt,
-        block::{Block, BlockIO, PartitionInfo, NFS_MAGIC},
+        block::{Block, BlockKind, BlockReader, NFS_MAGIC},
         split::SplitFileReader,
-        Format, KeyBytes, MagicBytes,
     },
-    static_assert,
-    util::read::read_from,
-    DiscMeta, Error, Result, ResultContext,
+    read::DiscMeta,
+    util::{aes::aes_cbc_decrypt, array_ref_mut, read::read_arc, static_assert},
+    Error, Result, ResultContext,
 };
 
 pub const NFS_END_MAGIC: MagicBytes = *b"SGGE";
@@ -84,19 +83,19 @@ impl NFSHeader {
 }
 
 #[derive(Clone)]
-pub struct DiscIONFS {
+pub struct BlockReaderNFS {
     inner: SplitFileReader,
-    header: NFSHeader,
+    header: Arc<NFSHeader>,
     raw_size: u64,
     disc_size: u64,
     key: KeyBytes,
 }
 
-impl DiscIONFS {
+impl BlockReaderNFS {
     pub fn new(directory: &Path) -> Result<Box<Self>> {
         let mut disc_io = Box::new(Self {
             inner: SplitFileReader::empty(),
-            header: NFSHeader::new_zeroed(),
+            header: Arc::new(NFSHeader::new_zeroed()),
             raw_size: 0,
             disc_size: 0,
             key: [0; 16],
@@ -106,18 +105,13 @@ impl DiscIONFS {
     }
 }
 
-impl BlockIO for DiscIONFS {
-    fn read_block_internal(
-        &mut self,
-        out: &mut [u8],
-        sector: u32,
-        partition: Option<&PartitionInfo>,
-    ) -> io::Result<Block> {
+impl BlockReader for BlockReaderNFS {
+    fn read_block(&mut self, out: &mut [u8], sector: u32) -> io::Result<Block> {
         // Calculate physical sector
         let phys_sector = self.header.phys_sector(sector);
         if phys_sector == u32::MAX {
             // Logical zero sector
-            return Ok(Block::Zero);
+            return Ok(Block::sector(sector, BlockKind::Raw));
         }
 
         // Read sector
@@ -130,15 +124,10 @@ impl BlockIO for DiscIONFS {
         *array_ref_mut!(iv, 12, 4) = sector.to_be_bytes();
         aes_cbc_decrypt(&self.key, &iv, out);
 
-        match partition {
-            Some(partition) if partition.has_encryption => {
-                Ok(Block::PartDecrypted { has_hashes: true })
-            }
-            _ => Ok(Block::Raw),
-        }
+        Ok(Block::sector(sector, BlockKind::PartDecrypted { hash_block: true }))
     }
 
-    fn block_size_internal(&self) -> u32 { SECTOR_SIZE as u32 }
+    fn block_size(&self) -> u32 { SECTOR_SIZE as u32 }
 
     fn meta(&self) -> DiscMeta {
         DiscMeta { format: Format::Nfs, decrypted: true, ..Default::default() }
@@ -168,7 +157,7 @@ fn get_nfs(directory: &Path, num: u32) -> Result<PathBuf> {
     }
 }
 
-impl DiscIONFS {
+impl BlockReaderNFS {
     pub fn load_files(&mut self, directory: &Path) -> Result<()> {
         {
             // Load key file
@@ -201,7 +190,7 @@ impl DiscIONFS {
             let mut file = BufReader::new(
                 File::open(&path).with_context(|| format!("Opening file {}", path.display()))?,
             );
-            let header: NFSHeader = read_from(&mut file)
+            let header: Arc<NFSHeader> = read_arc(&mut file)
                 .with_context(|| format!("Reading NFS header from file {}", path.display()))?;
             header.validate()?;
             // log::debug!("{:?}", header);

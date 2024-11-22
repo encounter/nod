@@ -2,190 +2,144 @@ use std::{
     io,
     io::{BufRead, Read, Seek, SeekFrom},
     mem::size_of,
+    sync::Arc,
 };
 
-use zerocopy::{FromBytes, FromZeros};
+use zerocopy::FromBytes;
 
-use super::{
-    ApploaderHeader, DiscHeader, DolHeader, FileStream, Node, PartitionBase, PartitionHeader,
-    PartitionMeta, BI2_SIZE, BOOT_SIZE, SECTOR_SIZE,
-};
 use crate::{
-    disc::streams::OwnedFileStream,
-    io::block::{Block, BlockIO},
-    util::read::{read_box, read_box_slice, read_vec},
+    disc::{
+        preloader::{Preloader, SectorGroup, SectorGroupRequest},
+        ApploaderHeader, DiscHeader, DolHeader, PartitionHeader, BI2_SIZE, BOOT_SIZE,
+        SECTOR_GROUP_SIZE, SECTOR_SIZE,
+    },
+    io::block::BlockReader,
+    read::{PartitionEncryption, PartitionMeta, PartitionReader},
+    util::{
+        impl_read_for_bufread,
+        read::{read_arc, read_arc_slice, read_vec},
+    },
     Result, ResultContext,
 };
 
-pub struct PartitionGC {
-    io: Box<dyn BlockIO>,
-    block: Block,
-    block_buf: Box<[u8]>,
-    block_idx: u32,
-    sector_buf: Box<[u8; SECTOR_SIZE]>,
-    sector: u32,
+pub struct PartitionReaderGC {
+    io: Box<dyn BlockReader>,
+    preloader: Arc<Preloader>,
     pos: u64,
-    disc_header: Box<DiscHeader>,
+    disc_size: u64,
+    sector_group: Option<SectorGroup>,
+    meta: Option<PartitionMeta>,
 }
 
-impl Clone for PartitionGC {
+impl Clone for PartitionReaderGC {
     fn clone(&self) -> Self {
         Self {
             io: self.io.clone(),
-            block: Block::default(),
-            block_buf: <[u8]>::new_box_zeroed_with_elems(self.block_buf.len()).unwrap(),
-            block_idx: u32::MAX,
-            sector_buf: <[u8; SECTOR_SIZE]>::new_box_zeroed().unwrap(),
-            sector: u32::MAX,
+            preloader: self.preloader.clone(),
             pos: 0,
-            disc_header: self.disc_header.clone(),
+            disc_size: self.disc_size,
+            sector_group: None,
+            meta: self.meta.clone(),
         }
     }
 }
 
-impl PartitionGC {
-    pub fn new(inner: Box<dyn BlockIO>, disc_header: Box<DiscHeader>) -> Result<Box<Self>> {
-        let block_size = inner.block_size();
+impl PartitionReaderGC {
+    pub fn new(
+        inner: Box<dyn BlockReader>,
+        preloader: Arc<Preloader>,
+        disc_size: u64,
+    ) -> Result<Box<Self>> {
         Ok(Box::new(Self {
             io: inner,
-            block: Block::default(),
-            block_buf: <[u8]>::new_box_zeroed_with_elems(block_size as usize).unwrap(),
-            block_idx: u32::MAX,
-            sector_buf: <[u8; SECTOR_SIZE]>::new_box_zeroed().unwrap(),
-            sector: u32::MAX,
+            preloader,
             pos: 0,
-            disc_header,
+            disc_size,
+            sector_group: None,
+            meta: None,
         }))
     }
-
-    pub fn into_inner(self) -> Box<dyn BlockIO> { self.io }
 }
 
-impl BufRead for PartitionGC {
+impl BufRead for PartitionReaderGC {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        let sector = (self.pos / SECTOR_SIZE as u64) as u32;
-        let block_idx = (sector as u64 * SECTOR_SIZE as u64 / self.block_buf.len() as u64) as u32;
-
-        // Read new block if necessary
-        if block_idx != self.block_idx {
-            self.block = self.io.read_block(self.block_buf.as_mut(), block_idx, None)?;
-            self.block_idx = block_idx;
+        if self.pos >= self.disc_size {
+            return Ok(&[]);
         }
 
-        // Copy sector if necessary
-        if sector != self.sector {
-            self.block.copy_raw(
-                self.sector_buf.as_mut(),
-                self.block_buf.as_ref(),
-                sector,
-                &self.disc_header,
-            )?;
-            self.sector = sector;
-        }
+        let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
+        let group_idx = abs_sector / 64;
+        let abs_group_sector = group_idx * 64;
+        let max_groups = self.disc_size.div_ceil(SECTOR_GROUP_SIZE as u64) as u32;
+        let request = SectorGroupRequest {
+            group_idx,
+            partition_idx: None,
+            mode: PartitionEncryption::Original,
+        };
 
-        let offset = (self.pos % SECTOR_SIZE as u64) as usize;
-        Ok(&self.sector_buf[offset..])
+        let sector_group = if matches!(&self.sector_group, Some(sector_group) if sector_group.request == request)
+        {
+            // We can improve this in Rust 2024 with `if_let_rescope`
+            // https://github.com/rust-lang/rust/issues/124085
+            self.sector_group.as_ref().unwrap()
+        } else {
+            self.sector_group.insert(self.preloader.fetch(request, max_groups)?)
+        };
+
+        // Calculate the number of consecutive sectors in the group
+        let group_sector = abs_sector - abs_group_sector;
+        let consecutive_sectors = sector_group.consecutive_sectors(group_sector);
+        if consecutive_sectors == 0 {
+            return Ok(&[]);
+        }
+        let num_sectors = group_sector + consecutive_sectors;
+
+        // Read from sector group buffer
+        let group_start = abs_group_sector as u64 * SECTOR_SIZE as u64;
+        let offset = (self.pos - group_start) as usize;
+        let end =
+            (num_sectors as u64 * SECTOR_SIZE as u64).min(self.disc_size - group_start) as usize;
+        Ok(&sector_group.data[offset..end])
     }
 
     #[inline]
     fn consume(&mut self, amt: usize) { self.pos += amt as u64; }
 }
 
-impl Read for PartitionGC {
-    #[inline]
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        let buf = self.fill_buf()?;
-        let len = buf.len().min(out.len());
-        out[..len].copy_from_slice(&buf[..len]);
-        self.consume(len);
-        Ok(len)
-    }
-}
+impl_read_for_bufread!(PartitionReaderGC);
 
-impl Seek for PartitionGC {
+impl Seek for PartitionReaderGC {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.pos = match pos {
             SeekFrom::Start(v) => v,
-            SeekFrom::End(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "GCPartitionReader: SeekFrom::End is not supported".to_string(),
-                ));
-            }
+            SeekFrom::End(v) => self.disc_size.saturating_add_signed(v),
             SeekFrom::Current(v) => self.pos.saturating_add_signed(v),
         };
         Ok(self.pos)
     }
+
+    fn stream_position(&mut self) -> io::Result<u64> { Ok(self.pos) }
 }
 
-impl PartitionBase for PartitionGC {
-    fn meta(&mut self) -> Result<Box<PartitionMeta>> {
-        self.seek(SeekFrom::Start(0)).context("Seeking to partition metadata")?;
-        read_part_meta(self, false)
-    }
+impl PartitionReader for PartitionReaderGC {
+    fn is_wii(&self) -> bool { false }
 
-    fn open_file(&mut self, node: Node) -> io::Result<FileStream> {
-        if !node.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Node is not a file".to_string(),
-            ));
+    fn meta(&mut self) -> Result<PartitionMeta> {
+        if let Some(meta) = &self.meta {
+            Ok(meta.clone())
+        } else {
+            let meta = read_part_meta(self, false)?;
+            self.meta = Some(meta.clone());
+            Ok(meta)
         }
-        FileStream::new(self, node.offset(false), node.length())
-    }
-
-    fn into_open_file(self: Box<Self>, node: Node) -> io::Result<OwnedFileStream> {
-        if !node.is_file() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Node is not a file".to_string(),
-            ));
-        }
-        OwnedFileStream::new(self, node.offset(false), node.length())
     }
 }
 
-pub(crate) fn read_part_meta(
-    reader: &mut dyn PartitionBase,
+pub(crate) fn read_dol(
+    reader: &mut dyn PartitionReader,
+    partition_header: &PartitionHeader,
     is_wii: bool,
-) -> Result<Box<PartitionMeta>> {
-    // boot.bin
-    let raw_boot: Box<[u8; BOOT_SIZE]> = read_box(reader).context("Reading boot.bin")?;
-    let partition_header =
-        PartitionHeader::ref_from_bytes(&raw_boot[size_of::<DiscHeader>()..]).unwrap();
-
-    // bi2.bin
-    let raw_bi2: Box<[u8; BI2_SIZE]> = read_box(reader).context("Reading bi2.bin")?;
-
-    // apploader.bin
-    let mut raw_apploader: Vec<u8> =
-        read_vec(reader, size_of::<ApploaderHeader>()).context("Reading apploader header")?;
-    let apploader_header = ApploaderHeader::ref_from_bytes(raw_apploader.as_slice()).unwrap();
-    raw_apploader.resize(
-        size_of::<ApploaderHeader>()
-            + apploader_header.size.get() as usize
-            + apploader_header.trailer_size.get() as usize,
-        0,
-    );
-    reader
-        .read_exact(&mut raw_apploader[size_of::<ApploaderHeader>()..])
-        .context("Reading apploader")?;
-    let raw_apploader = raw_apploader.into_boxed_slice();
-
-    // fst.bin
-    reader
-        .seek(SeekFrom::Start(partition_header.fst_offset(is_wii)))
-        .context("Seeking to FST offset")?;
-    let raw_fst: Box<[u8]> = read_box_slice(reader, partition_header.fst_size(is_wii) as usize)
-        .with_context(|| {
-            format!(
-                "Reading partition FST (offset {}, size {})",
-                partition_header.fst_offset(is_wii),
-                partition_header.fst_size(is_wii)
-            )
-        })?;
-
-    // main.dol
+) -> Result<Arc<[u8]>> {
     reader
         .seek(SeekFrom::Start(partition_header.dol_offset(is_wii)))
         .context("Seeking to DOL offset")?;
@@ -208,9 +162,65 @@ pub(crate) fn read_part_meta(
         .unwrap_or(size_of::<DolHeader>() as u32);
     raw_dol.resize(dol_size as usize, 0);
     reader.read_exact(&mut raw_dol[size_of::<DolHeader>()..]).context("Reading DOL")?;
-    let raw_dol = raw_dol.into_boxed_slice();
+    Ok(Arc::from(raw_dol.as_slice()))
+}
 
-    Ok(Box::new(PartitionMeta {
+pub(crate) fn read_fst<R>(
+    reader: &mut R,
+    partition_header: &PartitionHeader,
+    is_wii: bool,
+) -> Result<Arc<[u8]>>
+where
+    R: Read + Seek + ?Sized,
+{
+    reader
+        .seek(SeekFrom::Start(partition_header.fst_offset(is_wii)))
+        .context("Seeking to FST offset")?;
+    let raw_fst: Arc<[u8]> = read_arc_slice(reader, partition_header.fst_size(is_wii) as usize)
+        .with_context(|| {
+            format!(
+                "Reading partition FST (offset {}, size {})",
+                partition_header.fst_offset(is_wii),
+                partition_header.fst_size(is_wii)
+            )
+        })?;
+    Ok(raw_fst)
+}
+
+pub(crate) fn read_part_meta(
+    reader: &mut dyn PartitionReader,
+    is_wii: bool,
+) -> Result<PartitionMeta> {
+    // boot.bin
+    let raw_boot: Arc<[u8; BOOT_SIZE]> = read_arc(reader).context("Reading boot.bin")?;
+    let partition_header =
+        PartitionHeader::ref_from_bytes(&raw_boot[size_of::<DiscHeader>()..]).unwrap();
+
+    // bi2.bin
+    let raw_bi2: Arc<[u8; BI2_SIZE]> = read_arc(reader).context("Reading bi2.bin")?;
+
+    // apploader.bin
+    let mut raw_apploader: Vec<u8> =
+        read_vec(reader, size_of::<ApploaderHeader>()).context("Reading apploader header")?;
+    let apploader_header = ApploaderHeader::ref_from_bytes(raw_apploader.as_slice()).unwrap();
+    raw_apploader.resize(
+        size_of::<ApploaderHeader>()
+            + apploader_header.size.get() as usize
+            + apploader_header.trailer_size.get() as usize,
+        0,
+    );
+    reader
+        .read_exact(&mut raw_apploader[size_of::<ApploaderHeader>()..])
+        .context("Reading apploader")?;
+    let raw_apploader = Arc::from(raw_apploader.as_slice());
+
+    // fst.bin
+    let raw_fst = read_fst(reader, partition_header, is_wii)?;
+
+    // main.dol
+    let raw_dol = read_dol(reader, partition_header, is_wii)?;
+
+    Ok(PartitionMeta {
         raw_boot,
         raw_bi2,
         raw_apploader,
@@ -220,5 +230,5 @@ pub(crate) fn read_part_meta(
         raw_tmd: None,
         raw_cert_chain: None,
         raw_h3_table: None,
-    }))
+    })
 }

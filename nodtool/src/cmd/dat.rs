@@ -1,23 +1,18 @@
 use std::{
-    cmp::min,
     collections::BTreeMap,
     fmt,
-    io::Read,
     path::{Path, PathBuf},
-    sync::{mpsc::sync_channel, Arc},
-    thread,
 };
 
 use argp::FromArgs;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
-use nod::{Disc, OpenOptions, PartitionEncryptionMode, Result, ResultContext};
-use zerocopy::FromZeros;
-
-use crate::util::{
-    digest::{digest_thread, DigestResult},
-    redump,
-    redump::GameResult,
+use nod::{
+    read::{DiscOptions, DiscReader, PartitionEncryption},
+    write::{DiscWriter, FormatOptions, ProcessOptions},
+    Result, ResultContext,
 };
+
+use crate::util::{redump, redump::GameResult};
 
 #[derive(FromArgs, Debug)]
 /// Commands related to DAT files.
@@ -165,9 +160,9 @@ struct DiscHashes {
 }
 
 fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
-    let options = OpenOptions { partition_encryption: PartitionEncryptionMode::Original };
-    let mut disc = Disc::new_with_options(path, &options)?;
-    let disc_size = disc.disc_size();
+    let options =
+        DiscOptions { partition_encryption: PartitionEncryption::Original, preloader_threads: 4 };
+    let disc = DiscReader::new(path, &options)?;
     if !full_verify {
         let meta = disc.meta();
         if let (Some(crc32), Some(sha1)) = (meta.crc32, meta.sha1) {
@@ -175,7 +170,8 @@ fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
         }
     }
 
-    let pb = ProgressBar::new(disc_size).with_message(format!("{}:", name));
+    let disc_writer = DiscWriter::new(disc, &FormatOptions::default())?;
+    let pb = ProgressBar::new(disc_writer.progress_bound()).with_message(format!("{}:", name));
     pb.set_style(ProgressStyle::with_template("{msg} {spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
         .with_key("eta", |state: &ProgressState, w: &mut dyn fmt::Write| {
@@ -183,47 +179,22 @@ fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
         })
         .progress_chars("#>-"));
 
-    const BUFFER_SIZE: usize = 1015808; // LCM(0x8000, 0x7C00)
-    let digest_threads = [digest_thread::<crc32fast::Hasher>(), digest_thread::<sha1::Sha1>()];
-
-    let (w_tx, w_rx) = sync_channel::<Arc<[u8]>>(1);
-    let w_thread = thread::spawn(move || {
-        let mut total_written = 0u64;
-        while let Ok(data) = w_rx.recv() {
+    let mut total_written = 0u64;
+    let finalization = disc_writer.process(
+        |data, pos, _| {
             total_written += data.len() as u64;
-            pb.set_position(total_written);
-        }
-        pb.finish_and_clear();
-    });
+            pb.set_position(pos);
+            Ok(())
+        },
+        &ProcessOptions {
+            processor_threads: 12, // TODO
+            digest_crc32: true,
+            digest_md5: false,
+            digest_sha1: true,
+            digest_xxh64: false,
+        },
+    )?;
+    pb.finish();
 
-    let mut total_read = 0u64;
-    let mut buf = <[u8]>::new_box_zeroed_with_elems(BUFFER_SIZE)?;
-    while total_read < disc_size {
-        let read = min(BUFFER_SIZE as u64, disc_size - total_read) as usize;
-        disc.read_exact(&mut buf[..read]).with_context(|| {
-            format!("Reading {} bytes at disc offset {}", BUFFER_SIZE, total_read)
-        })?;
-
-        let arc = Arc::<[u8]>::from(&buf[..read]);
-        for (tx, _) in &digest_threads {
-            tx.send(arc.clone()).map_err(|_| "Sending data to hash thread")?;
-        }
-        w_tx.send(arc).map_err(|_| "Sending data to write thread")?;
-        total_read += read as u64;
-    }
-    drop(w_tx); // Close channel
-    w_thread.join().unwrap();
-
-    let mut crc32 = None;
-    let mut sha1 = None;
-    for (tx, handle) in digest_threads {
-        drop(tx); // Close channel
-        match handle.join().unwrap() {
-            DigestResult::Crc32(v) => crc32 = Some(v),
-            DigestResult::Sha1(v) => sha1 = Some(v),
-            _ => {}
-        }
-    }
-
-    Ok(DiscHashes { crc32: crc32.unwrap(), sha1: sha1.unwrap() })
+    Ok(DiscHashes { crc32: finalization.crc32.unwrap(), sha1: finalization.sha1.unwrap() })
 }

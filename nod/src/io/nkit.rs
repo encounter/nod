@@ -1,13 +1,15 @@
 use std::{
     io,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Write},
 };
 
+use tracing::warn;
+
 use crate::{
+    common::MagicBytes,
     disc::DL_DVD_SIZE,
-    io::MagicBytes,
+    read::DiscMeta,
     util::read::{read_from, read_u16_be, read_u32_be, read_u64_be, read_vec},
-    DiscMeta,
 };
 
 #[allow(unused)]
@@ -56,19 +58,32 @@ const fn calc_header_size(version: u8, flags: u16, key_len: u32) -> usize {
     size
 }
 
-#[allow(unused)]
 #[derive(Debug, Clone)]
 pub struct NKitHeader {
     pub version: u8,
-    pub flags: u16,
     pub size: Option<u64>,
     pub crc32: Option<u32>,
     pub md5: Option<[u8; 16]>,
     pub sha1: Option<[u8; 20]>,
-    pub xxhash64: Option<u64>,
+    pub xxh64: Option<u64>,
     /// Bitstream of blocks that are junk data
-    pub junk_bits: Option<Vec<u8>>,
-    pub block_size: u32,
+    pub junk_bits: Option<JunkBits>,
+    pub encrypted: bool,
+}
+
+impl Default for NKitHeader {
+    fn default() -> Self {
+        Self {
+            version: 2,
+            size: None,
+            crc32: None,
+            md5: None,
+            sha1: None,
+            xxh64: None,
+            junk_bits: None,
+            encrypted: false,
+        }
+    }
 }
 
 const VERSION_PREFIX: [u8; 7] = *b"NKIT  v";
@@ -82,7 +97,7 @@ impl NKitHeader {
             match NKitHeader::read_from(reader, block_size, has_junk_bits) {
                 Ok(header) => Some(header),
                 Err(e) => {
-                    log::warn!("Failed to read NKit header: {}", e);
+                    warn!("Failed to read NKit header: {}", e);
                     None
                 }
             }
@@ -136,25 +151,20 @@ impl NKitHeader {
         let sha1 = (flags & NKitHeaderFlags::Sha1 as u16 != 0)
             .then(|| read_from::<[u8; 20], _>(&mut inner))
             .transpose()?;
-        let xxhash64 = (flags & NKitHeaderFlags::Xxhash64 as u16 != 0)
+        let xxh64 = (flags & NKitHeaderFlags::Xxhash64 as u16 != 0)
             .then(|| read_u64_be(&mut inner))
             .transpose()?;
 
-        let junk_bits = if has_junk_bits {
-            let n = DL_DVD_SIZE.div_ceil(block_size as u64).div_ceil(8);
-            Some(read_vec(reader, n as usize)?)
-        } else {
-            None
-        };
+        let junk_bits =
+            if has_junk_bits { Some(JunkBits::read_from(reader, block_size)?) } else { None };
 
-        Ok(Self { version, flags, size, crc32, md5, sha1, xxhash64, junk_bits, block_size })
+        let encrypted = flags & NKitHeaderFlags::Encrypted as u16 != 0;
+
+        Ok(Self { version, size, crc32, md5, sha1, xxh64, junk_bits, encrypted })
     }
 
     pub fn is_junk_block(&self, block: u32) -> Option<bool> {
-        self.junk_bits
-            .as_ref()
-            .and_then(|v| v.get((block / 8) as usize))
-            .map(|&b| b & (1 << (7 - (block & 7))) != 0)
+        self.junk_bits.as_ref().map(|v| v.get(block))
     }
 
     pub fn apply(&self, meta: &mut DiscMeta) {
@@ -164,6 +174,128 @@ impl NKitHeader {
         meta.crc32 = self.crc32;
         meta.md5 = self.md5;
         meta.sha1 = self.sha1;
-        meta.xxhash64 = self.xxhash64;
+        meta.xxh64 = self.xxh64;
+    }
+
+    fn calc_flags(&self) -> u16 {
+        let mut flags = 0;
+        if self.size.is_some() {
+            flags |= NKitHeaderFlags::Size as u16;
+        }
+        if self.crc32.is_some() {
+            flags |= NKitHeaderFlags::Crc32 as u16;
+        }
+        if self.md5.is_some() {
+            flags |= NKitHeaderFlags::Md5 as u16;
+        }
+        if self.sha1.is_some() {
+            flags |= NKitHeaderFlags::Sha1 as u16;
+        }
+        if self.xxh64.is_some() {
+            flags |= NKitHeaderFlags::Xxhash64 as u16;
+        }
+        if self.encrypted {
+            flags |= NKitHeaderFlags::Encrypted as u16;
+        }
+        flags
+    }
+
+    pub fn write_to<W>(&self, w: &mut W) -> io::Result<()>
+    where W: Write + ?Sized {
+        w.write_all(&VERSION_PREFIX)?;
+        w.write_all(&[b'0' + self.version])?;
+        let flags = self.calc_flags();
+        match self.version {
+            1 => {}
+            2 => {
+                let header_size = calc_header_size(self.version, flags, 0) as u16;
+                w.write_all(&header_size.to_be_bytes())?;
+                w.write_all(&flags.to_be_bytes())?;
+            }
+            version => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Unsupported NKit header version: {}", version),
+                ));
+            }
+        };
+        if let Some(size) = self.size {
+            w.write_all(&size.to_be_bytes())?;
+        }
+        if let Some(crc32) = self.crc32 {
+            w.write_all(&crc32.to_be_bytes())?;
+        } else if self.version == 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing CRC32 in NKit v1 header",
+            ));
+        }
+        if let Some(md5) = self.md5 {
+            w.write_all(&md5)?;
+        } else if self.version == 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing MD5 in NKit v1 header",
+            ));
+        }
+        if let Some(sha1) = self.sha1 {
+            w.write_all(&sha1)?;
+        } else if self.version == 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing SHA1 in NKit v1 header",
+            ));
+        }
+        if let Some(xxh64) = self.xxh64 {
+            w.write_all(&xxh64.to_be_bytes())?;
+        } else if self.version == 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing XXHash64 in NKit header",
+            ));
+        }
+        if let Some(junk_bits) = &self.junk_bits {
+            junk_bits.write_to(w)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct JunkBits(Vec<u8>);
+
+impl JunkBits {
+    pub fn new(block_size: u32) -> Self { Self(vec![0; Self::len(block_size)]) }
+
+    pub fn read_from<R>(reader: &mut R, block_size: u32) -> io::Result<Self>
+    where R: Read + ?Sized {
+        Ok(Self(read_vec(reader, Self::len(block_size))?))
+    }
+
+    pub fn write_to<W>(&self, w: &mut W) -> io::Result<()>
+    where W: Write + ?Sized {
+        w.write_all(&self.0)
+    }
+
+    pub fn set(&mut self, block: u32, is_junk: bool) {
+        let Some(byte) = self.0.get_mut((block / 8) as usize) else {
+            return;
+        };
+        if is_junk {
+            *byte |= 1 << (7 - (block & 7));
+        } else {
+            *byte &= !(1 << (7 - (block & 7)));
+        }
+    }
+
+    pub fn get(&self, block: u32) -> bool {
+        let Some(&byte) = self.0.get((block / 8) as usize) else {
+            return false;
+        };
+        byte & (1 << (7 - (block & 7))) != 0
+    }
+
+    fn len(block_size: u32) -> usize {
+        DL_DVD_SIZE.div_ceil(block_size as u64).div_ceil(8) as usize
     }
 }

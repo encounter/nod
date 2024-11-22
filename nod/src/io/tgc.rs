@@ -1,19 +1,31 @@
 use std::{
     io,
-    io::{Read, Seek, SeekFrom},
-    mem::size_of,
+    io::{BufRead, Read, Seek, SeekFrom},
+    sync::Arc,
 };
 
-use zerocopy::{big_endian::U32, FromBytes, Immutable, IntoBytes, KnownLayout};
+use bytes::{BufMut, Bytes, BytesMut};
+use zerocopy::{big_endian::U32, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
 use crate::{
-    disc::SECTOR_SIZE,
-    io::{
-        block::{Block, BlockIO, DiscStream, PartitionInfo, TGC_MAGIC},
-        Format, MagicBytes,
+    build::gc::{insert_junk_data, FileCallback, GCPartitionStream, WriteInfo, WriteKind},
+    common::{Compression, Format, MagicBytes, PartitionKind},
+    disc::{
+        fst::Fst,
+        gcn::{read_dol, read_fst},
+        reader::DiscReader,
+        writer::{DataCallback, DiscWriter},
+        DiscHeader, PartitionHeader, SECTOR_SIZE,
     },
-    util::read::{read_box_slice, read_from},
-    DiscHeader, DiscMeta, Error, Node, PartitionHeader, Result, ResultContext,
+    io::block::{Block, BlockKind, BlockReader, TGC_MAGIC},
+    read::{DiscMeta, DiscStream, PartitionOptions, PartitionReader},
+    util::{
+        align_up_32, array_ref,
+        read::{read_arc, read_arc_slice, read_from, read_with_zero_fill},
+        static_assert,
+    },
+    write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    Error, Result, ResultContext,
 };
 
 /// TGC header (big endian)
@@ -46,21 +58,21 @@ struct TGCHeader {
     banner_offset: U32,
     /// Size of the banner
     banner_size: U32,
-    /// Original user data offset in the GCM
-    gcm_user_offset: U32,
+    /// Start of user files in the original GCM
+    gcm_files_start: U32,
 }
+
+static_assert!(size_of::<TGCHeader>() == 0x38);
+
+const GCM_HEADER_SIZE: usize = 0x100000;
 
 #[derive(Clone)]
-pub struct DiscIOTGC {
-    inner: Box<dyn DiscStream>,
-    stream_len: u64,
-    header: TGCHeader,
-    fst: Box<[u8]>,
+pub struct BlockReaderTGC {
+    inner: GCPartitionStream<FileCallbackTGC>,
 }
 
-impl DiscIOTGC {
-    pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
-        let stream_len = inner.seek(SeekFrom::End(0)).context("Determining stream length")?;
+impl BlockReaderTGC {
+    pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<dyn BlockReader>> {
         inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
 
         // Read header
@@ -68,89 +80,253 @@ impl DiscIOTGC {
         if header.magic != TGC_MAGIC {
             return Err(Error::DiscFormat("Invalid TGC magic".to_string()));
         }
+        let disc_size = (header.gcm_files_start.get() + header.user_size.get()) as u64;
 
-        // Read FST and adjust offsets
+        // Read disc header and partition header
         inner
-            .seek(SeekFrom::Start(header.fst_offset.get() as u64))
-            .context("Seeking to TGC FST")?;
-        let mut fst = read_box_slice(inner.as_mut(), header.fst_size.get() as usize)
-            .context("Reading TGC FST")?;
-        let (root_node, _) = Node::ref_from_prefix(&fst)
-            .map_err(|_| Error::DiscFormat("Invalid TGC FST".to_string()))?;
-        let node_count = root_node.length() as usize;
-        let (nodes, _) = <[Node]>::mut_from_prefix_with_elems(&mut fst, node_count)
-            .map_err(|_| Error::DiscFormat("Invalid TGC FST".to_string()))?;
-        for node in nodes {
-            if node.is_file() {
-                node.offset = node.offset - header.gcm_user_offset
-                    + (header.user_offset - header.header_offset);
-            }
-        }
+            .seek(SeekFrom::Start(header.header_offset.get() as u64))
+            .context("Seeking to GCM header")?;
+        let raw_header =
+            read_arc::<[u8; GCM_HEADER_SIZE], _>(inner.as_mut()).context("Reading GCM header")?;
 
-        Ok(Box::new(Self { inner, stream_len, header, fst }))
+        let (disc_header, remain) = DiscHeader::ref_from_prefix(raw_header.as_ref())
+            .expect("Invalid disc header alignment");
+        let disc_header = disc_header.clone();
+        let (partition_header, _) =
+            PartitionHeader::ref_from_prefix(remain).expect("Invalid partition header alignment");
+        let partition_header = partition_header.clone();
+
+        // Read DOL
+        inner.seek(SeekFrom::Start(header.dol_offset.get() as u64)).context("Seeking to DOL")?;
+        let raw_dol = read_arc_slice::<u8, _>(inner.as_mut(), header.dol_size.get() as usize)
+            .context("Reading DOL")?;
+
+        // Read FST
+        inner.seek(SeekFrom::Start(header.fst_offset.get() as u64)).context("Seeking to FST")?;
+        let raw_fst = read_arc_slice::<u8, _>(inner.as_mut(), header.fst_size.get() as usize)
+            .context("Reading FST")?;
+        let fst = Fst::new(&raw_fst)?;
+
+        let mut write_info = Vec::with_capacity(5 + fst.num_files());
+        write_info.push(WriteInfo {
+            kind: WriteKind::Static(raw_header, "sys/header.bin"),
+            size: GCM_HEADER_SIZE as u64,
+            offset: 0,
+        });
+        write_info.push(WriteInfo {
+            kind: WriteKind::Static(raw_dol, "sys/main.dol"),
+            size: header.dol_size.get() as u64,
+            offset: partition_header.dol_offset(false),
+        });
+        write_info.push(WriteInfo {
+            kind: WriteKind::Static(raw_fst.clone(), "sys/fst.bin"),
+            size: header.fst_size.get() as u64,
+            offset: partition_header.fst_offset(false),
+        });
+
+        // Collect files
+        for (_, node, path) in fst.iter() {
+            if node.is_dir() {
+                continue;
+            }
+            write_info.push(WriteInfo {
+                kind: WriteKind::File(path),
+                size: node.length() as u64,
+                offset: node.offset(false),
+            });
+        }
+        write_info.sort_unstable_by(|a, b| a.offset.cmp(&b.offset).then(a.size.cmp(&b.size)));
+        let write_info = insert_junk_data(write_info, &partition_header);
+
+        let file_callback = FileCallbackTGC::new(inner, raw_fst, header);
+        let disc_id = *array_ref![disc_header.game_id, 0, 4];
+        let disc_num = disc_header.disc_num;
+        Ok(Box::new(Self {
+            inner: GCPartitionStream::new(
+                file_callback,
+                Arc::from(write_info),
+                disc_size,
+                disc_id,
+                disc_num,
+            ),
+        }))
     }
 }
 
-impl BlockIO for DiscIOTGC {
-    fn read_block_internal(
-        &mut self,
-        out: &mut [u8],
-        block: u32,
-        partition: Option<&PartitionInfo>,
-    ) -> io::Result<Block> {
-        let offset = self.header.header_offset.get() as u64 + block as u64 * SECTOR_SIZE as u64;
-        if offset >= self.stream_len {
-            // End of file
-            return Ok(Block::Zero);
-        }
-
-        self.inner.seek(SeekFrom::Start(offset))?;
-        if offset + SECTOR_SIZE as u64 > self.stream_len {
-            // If the last block is not a full sector, fill the rest with zeroes
-            let read = (self.stream_len - offset) as usize;
-            self.inner.read_exact(&mut out[..read])?;
-            out[read..].fill(0);
-        } else {
-            self.inner.read_exact(out)?;
-        }
-
-        // Adjust internal GCM header
-        if block == 0 {
-            let partition_header = PartitionHeader::mut_from_bytes(
-                &mut out[size_of::<DiscHeader>()
-                    ..size_of::<DiscHeader>() + size_of::<PartitionHeader>()],
-            )
-            .unwrap();
-            partition_header.dol_offset = self.header.dol_offset - self.header.header_offset;
-            partition_header.fst_offset = self.header.fst_offset - self.header.header_offset;
-        }
-
-        // Copy modified FST to output
-        if offset + out.len() as u64 > self.header.fst_offset.get() as u64
-            && offset < self.header.fst_offset.get() as u64 + self.header.fst_size.get() as u64
-        {
-            let out_offset = (self.header.fst_offset.get() as u64).saturating_sub(offset) as usize;
-            let fst_offset = offset.saturating_sub(self.header.fst_offset.get() as u64) as usize;
-            let copy_len =
-                (out.len() - out_offset).min(self.header.fst_size.get() as usize - fst_offset);
-            out[out_offset..out_offset + copy_len]
-                .copy_from_slice(&self.fst[fst_offset..fst_offset + copy_len]);
-        }
-
-        match partition {
-            Some(partition) if partition.has_encryption => Ok(Block::PartEncrypted),
-            _ => Ok(Block::Raw),
-        }
+impl BlockReader for BlockReaderTGC {
+    fn read_block(&mut self, out: &mut [u8], sector: u32) -> io::Result<Block> {
+        let count = (out.len() / SECTOR_SIZE) as u32;
+        self.inner.set_position(sector as u64 * SECTOR_SIZE as u64);
+        let read = read_with_zero_fill(&mut self.inner, out)?;
+        Ok(Block::sectors(sector, count, if read == 0 { BlockKind::None } else { BlockKind::Raw }))
     }
 
-    fn block_size_internal(&self) -> u32 { SECTOR_SIZE as u32 }
+    fn block_size(&self) -> u32 { SECTOR_SIZE as u32 }
 
     fn meta(&self) -> DiscMeta {
-        DiscMeta {
-            format: Format::Tgc,
-            lossless: true,
-            disc_size: Some(self.stream_len - self.header.header_offset.get() as u64),
-            ..Default::default()
-        }
+        DiscMeta { format: Format::Tgc, disc_size: Some(self.inner.len()), ..Default::default() }
     }
+}
+
+#[derive(Clone)]
+struct FileCallbackTGC {
+    inner: Box<dyn DiscStream>,
+    fst: Arc<[u8]>,
+    header: TGCHeader,
+}
+
+impl FileCallbackTGC {
+    fn new(inner: Box<dyn DiscStream>, fst: Arc<[u8]>, header: TGCHeader) -> Self {
+        Self { inner, fst, header }
+    }
+}
+
+impl FileCallback for FileCallbackTGC {
+    fn read_file(&mut self, out: &mut [u8], name: &str, offset: u64) -> io::Result<()> {
+        let fst = Fst::new(&self.fst).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let (_, node) = fst.find(name).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("File not found in FST: {}", name))
+        })?;
+        if !node.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Path is a directory: {}", name),
+            ));
+        }
+        // Calculate file offset in TGC
+        let file_start = (node.offset(false) as u32 - self.header.gcm_files_start.get())
+            + self.header.user_offset.get();
+        self.inner.seek(SeekFrom::Start(file_start as u64 + offset))?;
+        self.inner.read_exact(out)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct DiscWriterTGC {
+    inner: Box<dyn PartitionReader>,
+    header: TGCHeader,
+    header_data: Bytes,
+    output_size: u64,
+}
+
+impl DiscWriterTGC {
+    pub fn new(reader: DiscReader, options: &FormatOptions) -> Result<Box<dyn DiscWriter>> {
+        if options.format != Format::Tgc {
+            return Err(Error::DiscFormat("Invalid format for TGC writer".to_string()));
+        }
+        if options.compression != Compression::None {
+            return Err(Error::DiscFormat("TGC does not support compression".to_string()));
+        }
+
+        let mut inner =
+            reader.open_partition_kind(PartitionKind::Data, &PartitionOptions::default())?;
+
+        // Read GCM header
+        let mut raw_header = <[u8; GCM_HEADER_SIZE]>::new_box_zeroed()?;
+        inner.read_exact(raw_header.as_mut()).context("Reading GCM header")?;
+        let (_, remain) = DiscHeader::ref_from_prefix(raw_header.as_ref())
+            .expect("Invalid disc header alignment");
+        let (partition_header, _) =
+            PartitionHeader::ref_from_prefix(remain).expect("Invalid partition header alignment");
+
+        // Read DOL
+        let raw_dol = read_dol(inner.as_mut(), partition_header, false)?;
+        let raw_fst = read_fst(inner.as_mut(), partition_header, false)?;
+
+        // Parse FST
+        let fst = Fst::new(&raw_fst)?;
+        let mut gcm_files_start = u32::MAX;
+        for (_, node, _) in fst.iter() {
+            if node.is_file() {
+                let start = node.offset(false) as u32;
+                if start < gcm_files_start {
+                    gcm_files_start = start;
+                }
+            }
+        }
+
+        // Layout system files
+        let gcm_header_offset = SECTOR_SIZE as u32;
+        let fst_offset = gcm_header_offset + GCM_HEADER_SIZE as u32;
+        let dol_offset = align_up_32(fst_offset + partition_header.fst_size.get(), 32);
+        let user_size =
+            partition_header.user_offset.get() + partition_header.user_size.get() - gcm_files_start;
+        let user_end =
+            align_up_32(dol_offset + raw_dol.len() as u32 + user_size, SECTOR_SIZE as u32);
+        let user_offset = user_end - user_size;
+
+        let header = TGCHeader {
+            magic: TGC_MAGIC,
+            version: 0.into(),
+            header_offset: gcm_header_offset.into(),
+            header_size: (GCM_HEADER_SIZE as u32).into(),
+            fst_offset: fst_offset.into(),
+            fst_size: partition_header.fst_size,
+            fst_max_size: partition_header.fst_max_size,
+            dol_offset: dol_offset.into(),
+            dol_size: (raw_dol.len() as u32).into(),
+            user_offset: user_offset.into(),
+            user_size: user_size.into(),
+            banner_offset: 0.into(),
+            banner_size: 0.into(),
+            gcm_files_start: gcm_files_start.into(),
+        };
+        let mut buffer = BytesMut::with_capacity(user_offset as usize);
+        buffer.put_slice(header.as_bytes());
+        buffer.put_bytes(0, gcm_header_offset as usize - buffer.len());
+
+        // Write GCM header
+        buffer.put_slice(raw_header.as_ref());
+        buffer.put_bytes(0, fst_offset as usize - buffer.len());
+
+        // Write FST
+        buffer.put_slice(raw_fst.as_ref());
+        buffer.put_bytes(0, dol_offset as usize - buffer.len());
+
+        // Write DOL
+        buffer.put_slice(raw_dol.as_ref());
+        buffer.put_bytes(0, user_offset as usize - buffer.len());
+
+        let header_data = buffer.freeze();
+        Ok(Box::new(Self { inner, header, header_data, output_size: user_end as u64 }))
+    }
+}
+
+impl DiscWriter for DiscWriterTGC {
+    fn process(
+        &self,
+        data_callback: &mut DataCallback,
+        _options: &ProcessOptions,
+    ) -> Result<DiscFinalization> {
+        let mut data_position = self.header.user_offset.get() as u64;
+        data_callback(self.header_data.clone(), data_position, self.output_size)
+            .context("Failed to write TGC header")?;
+
+        // Write user data serially
+        let mut inner = self.inner.clone();
+        inner
+            .seek(SeekFrom::Start(self.header.gcm_files_start.get() as u64))
+            .context("Seeking to GCM files start")?;
+        loop {
+            // TODO use DiscReader::fill_buf_internal
+            let buf = inner
+                .fill_buf()
+                .with_context(|| format!("Reading disc data at offset {data_position}"))?;
+            let len = buf.len();
+            if len == 0 {
+                break;
+            }
+            data_position += len as u64;
+            data_callback(Bytes::copy_from_slice(buf), data_position, self.output_size)
+                .context("Failed to write disc data")?;
+            inner.consume(len);
+        }
+
+        Ok(DiscFinalization::default())
+    }
+
+    fn progress_bound(&self) -> u64 { self.output_size }
+
+    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Light }
 }

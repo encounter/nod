@@ -1,22 +1,21 @@
 use std::{
-    cmp::min,
     fmt,
     fs::File,
-    io::{Read, Write},
+    io::{Seek, SeekFrom, Write},
     path::Path,
-    sync::{mpsc::sync_channel, Arc},
-    thread,
 };
 
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
-use nod::{Compression, Disc, DiscHeader, DiscMeta, OpenOptions, Result, ResultContext};
-use size::Size;
-use zerocopy::FromZeros;
-
-use crate::util::{
-    digest::{digest_thread, DigestResult},
-    display, redump,
+use nod::{
+    common::Compression,
+    disc::DiscHeader,
+    read::{DiscMeta, DiscOptions, DiscReader, PartitionEncryption},
+    write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions},
+    Result, ResultContext,
 };
+use size::Size;
+
+use crate::util::{digest::DigestResult, path_display, redump};
 
 pub fn print_header(header: &DiscHeader, meta: &DiscMeta) {
     println!("Format: {}", meta.format);
@@ -29,20 +28,17 @@ pub fn print_header(header: &DiscHeader, meta: &DiscMeta) {
     println!("Lossless: {}", meta.lossless);
     println!(
         "Verification data: {}",
-        meta.crc32.is_some()
-            || meta.md5.is_some()
-            || meta.sha1.is_some()
-            || meta.xxhash64.is_some()
+        meta.crc32.is_some() || meta.md5.is_some() || meta.sha1.is_some() || meta.xxh64.is_some()
     );
     println!();
     println!("Title: {}", header.game_title_str());
     println!("Game ID: {}", header.game_id_str());
     println!("Disc {}, Revision {}", header.disc_num + 1, header.disc_version);
-    if !header.has_partition_hashes() {
-        println!("[!] Disc has no hashes");
-    }
     if !header.has_partition_encryption() {
         println!("[!] Disc is not encrypted");
+    }
+    if !header.has_partition_hashes() {
+        println!("[!] Disc has no hashes");
     }
 }
 
@@ -50,31 +46,53 @@ pub fn convert_and_verify(
     in_file: &Path,
     out_file: Option<&Path>,
     md5: bool,
-    options: &OpenOptions,
+    options: &DiscOptions,
+    format_options: &FormatOptions,
 ) -> Result<()> {
-    println!("Loading {}", display(in_file));
-    let mut disc = Disc::new_with_options(in_file, options)?;
+    println!("Loading {}", path_display(in_file));
+    let disc = DiscReader::new(in_file, options)?;
     let header = disc.header();
     let meta = disc.meta();
     print_header(header, &meta);
 
-    let disc_size = disc.disc_size();
-
     let mut file = if let Some(out_file) = out_file {
         Some(
             File::create(out_file)
-                .with_context(|| format!("Creating file {}", display(out_file)))?,
+                .with_context(|| format!("Creating file {}", path_display(out_file)))?,
         )
     } else {
         None
     };
 
     if out_file.is_some() {
-        println!("\nConverting...");
+        match options.partition_encryption {
+            PartitionEncryption::ForceEncrypted => {
+                println!("\nConverting to {} (encrypted)...", format_options.format)
+            }
+            PartitionEncryption::ForceDecrypted => {
+                println!("\nConverting to {} (decrypted)...", format_options.format)
+            }
+            _ => println!("\nConverting to {}...", format_options.format),
+        }
+        if format_options.compression != Compression::None {
+            println!("Compression: {}", format_options.compression);
+        }
+        if format_options.block_size > 0 {
+            println!("Block size: {}", Size::from_bytes(format_options.block_size));
+        }
     } else {
-        println!("\nVerifying...");
+        match options.partition_encryption {
+            PartitionEncryption::ForceEncrypted => {
+                println!("\nVerifying (encrypted)...")
+            }
+            PartitionEncryption::ForceDecrypted => {
+                println!("\nVerifying (decrypted)...")
+            }
+            _ => println!("\nVerifying..."),
+        }
     }
-    let pb = ProgressBar::new(disc_size);
+    let disc_writer = DiscWriter::new(disc, format_options)?;
+    let pb = ProgressBar::new(disc_writer.progress_bound());
     pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
         .with_key("eta", |state: &ProgressState, w: &mut dyn fmt::Write| {
@@ -82,85 +100,71 @@ pub fn convert_and_verify(
         })
         .progress_chars("#>-"));
 
-    const BUFFER_SIZE: usize = 1015808; // LCM(0x8000, 0x7C00)
-    let digest_threads = if md5 {
-        vec![
-            digest_thread::<crc32fast::Hasher>(),
-            digest_thread::<md5::Md5>(),
-            digest_thread::<sha1::Sha1>(),
-            digest_thread::<xxhash_rust::xxh64::Xxh64>(),
-        ]
-    } else {
-        vec![
-            digest_thread::<crc32fast::Hasher>(),
-            digest_thread::<sha1::Sha1>(),
-            digest_thread::<xxhash_rust::xxh64::Xxh64>(),
-        ]
+    let cpus = num_cpus::get();
+    let processor_threads = match disc_writer.weight() {
+        DiscWriterWeight::Light => 0,
+        DiscWriterWeight::Medium => cpus / 2,
+        DiscWriterWeight::Heavy => cpus,
     };
 
-    let (w_tx, w_rx) = sync_channel::<Arc<[u8]>>(1);
-    let w_thread = thread::spawn(move || {
-        let mut total_written = 0u64;
-        while let Ok(data) = w_rx.recv() {
+    let mut total_written = 0u64;
+    let finalization = disc_writer.process(
+        |data, pos, _| {
             if let Some(file) = &mut file {
-                file.write_all(data.as_ref())
-                    .with_context(|| {
-                        format!("Writing {} bytes at offset {}", data.len(), total_written)
-                    })
-                    .unwrap();
+                file.write_all(data.as_ref())?;
             }
             total_written += data.len() as u64;
-            pb.set_position(total_written);
-        }
-        if let Some(mut file) = file {
-            file.flush().context("Flushing output file").unwrap();
-        }
-        pb.finish();
-    });
+            pb.set_position(pos);
+            Ok(())
+        },
+        &ProcessOptions {
+            processor_threads,
+            digest_crc32: true,
+            digest_md5: md5,
+            digest_sha1: true,
+            digest_xxh64: true,
+        },
+    )?;
+    pb.finish();
 
-    let mut total_read = 0u64;
-    let mut buf = <[u8]>::new_box_zeroed_with_elems(BUFFER_SIZE)?;
-    while total_read < disc_size {
-        let read = min(BUFFER_SIZE as u64, disc_size - total_read) as usize;
-        disc.read_exact(&mut buf[..read]).with_context(|| {
-            format!("Reading {} bytes at disc offset {}", BUFFER_SIZE, total_read)
-        })?;
-
-        let arc = Arc::<[u8]>::from(&buf[..read]);
-        for (tx, _) in &digest_threads {
-            tx.send(arc.clone()).map_err(|_| "Sending data to hash thread")?;
+    // Finalize disc writer
+    if !finalization.header.is_empty() {
+        if let Some(file) = &mut file {
+            file.seek(SeekFrom::Start(0)).context("Seeking to start of output file")?;
+            file.write_all(finalization.header.as_ref()).context("Writing header")?;
+        } else {
+            return Err(nod::Error::Other("No output file, but requires finalization".to_string()));
         }
-        w_tx.send(arc).map_err(|_| "Sending data to write thread")?;
-        total_read += read as u64;
     }
-    drop(w_tx); // Close channel
-    w_thread.join().unwrap();
+    if let Some(mut file) = file {
+        file.flush().context("Flushing output file")?;
+    }
 
     println!();
     if let Some(path) = out_file {
-        println!("Wrote {} to {}", Size::from_bytes(total_read), display(path));
+        println!("Wrote {} to {}", Size::from_bytes(total_written), path_display(path));
     }
-
     println!();
-    let mut crc32 = None;
-    let mut md5 = None;
-    let mut sha1 = None;
-    let mut xxh64 = None;
-    for (tx, handle) in digest_threads {
-        drop(tx); // Close channel
-        match handle.join().unwrap() {
-            DigestResult::Crc32(v) => crc32 = Some(v),
-            DigestResult::Md5(v) => md5 = Some(v),
-            DigestResult::Sha1(v) => sha1 = Some(v),
-            DigestResult::Xxh64(v) => xxh64 = Some(v),
-        }
-    }
 
-    let redump_entry = crc32.and_then(redump::find_by_crc32);
-    let expected_crc32 = meta.crc32.or(redump_entry.as_ref().map(|e| e.crc32));
-    let expected_md5 = meta.md5.or(redump_entry.as_ref().map(|e| e.md5));
-    let expected_sha1 = meta.sha1.or(redump_entry.as_ref().map(|e| e.sha1));
-    let expected_xxh64 = meta.xxhash64;
+    let mut redump_entry = None;
+    let mut expected_crc32 = None;
+    let mut expected_md5 = None;
+    let mut expected_sha1 = None;
+    let mut expected_xxh64 = None;
+    if options.partition_encryption == PartitionEncryption::Original {
+        // Use verification data in disc and check redump
+        redump_entry = finalization.crc32.and_then(redump::find_by_crc32);
+        expected_crc32 = meta.crc32.or(redump_entry.as_ref().map(|e| e.crc32));
+        expected_md5 = meta.md5.or(redump_entry.as_ref().map(|e| e.md5));
+        expected_sha1 = meta.sha1.or(redump_entry.as_ref().map(|e| e.sha1));
+        expected_xxh64 = meta.xxh64;
+    } else if options.partition_encryption == PartitionEncryption::ForceEncrypted {
+        // Ignore verification data in disc, but still check redump
+        redump_entry = finalization.crc32.and_then(redump::find_by_crc32);
+        expected_crc32 = redump_entry.as_ref().map(|e| e.crc32);
+        expected_md5 = redump_entry.as_ref().map(|e| e.md5);
+        expected_sha1 = redump_entry.as_ref().map(|e| e.sha1);
+    }
 
     fn print_digest(value: DigestResult, expected: Option<DigestResult>) {
         print!("{:<6}: ", value.name());
@@ -176,36 +180,36 @@ pub fn convert_and_verify(
         println!();
     }
 
-    if let Some(entry) = &redump_entry {
-        let mut full_match = true;
-        if let Some(md5) = md5 {
-            if entry.md5 != md5 {
-                full_match = false;
+    if let Some(crc32) = finalization.crc32 {
+        if let Some(entry) = &redump_entry {
+            let mut full_match = true;
+            if let Some(md5) = finalization.md5 {
+                if entry.md5 != md5 {
+                    full_match = false;
+                }
             }
-        }
-        if let Some(sha1) = sha1 {
-            if entry.sha1 != sha1 {
-                full_match = false;
+            if let Some(sha1) = finalization.sha1 {
+                if entry.sha1 != sha1 {
+                    full_match = false;
+                }
             }
-        }
-        if full_match {
-            println!("Redump: {} ✅", entry.name);
+            if full_match {
+                println!("Redump: {} ✅", entry.name);
+            } else {
+                println!("Redump: {} ❓ (partial match)", entry.name);
+            }
         } else {
-            println!("Redump: {} ❓ (partial match)", entry.name);
+            println!("Redump: Not found ❌");
         }
-    } else {
-        println!("Redump: Not found ❌");
-    }
-    if let Some(crc32) = crc32 {
         print_digest(DigestResult::Crc32(crc32), expected_crc32.map(DigestResult::Crc32));
     }
-    if let Some(md5) = md5 {
+    if let Some(md5) = finalization.md5 {
         print_digest(DigestResult::Md5(md5), expected_md5.map(DigestResult::Md5));
     }
-    if let Some(sha1) = sha1 {
+    if let Some(sha1) = finalization.sha1 {
         print_digest(DigestResult::Sha1(sha1), expected_sha1.map(DigestResult::Sha1));
     }
-    if let Some(xxh64) = xxh64 {
+    if let Some(xxh64) = finalization.xxh64 {
         print_digest(DigestResult::Xxh64(xxh64), expected_xxh64.map(DigestResult::Xxh64));
     }
     Ok(())

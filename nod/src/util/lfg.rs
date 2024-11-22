@@ -1,22 +1,30 @@
+//! Lagged Fibonacci generator for GC / Wii partition junk data.
+
 use std::{
     cmp::min,
     io,
     io::{Read, Write},
 };
 
+use bytes::Buf;
 use zerocopy::{transmute_ref, IntoBytes};
 
 use crate::disc::SECTOR_SIZE;
 
+/// Value of `k` for the LFG.
 pub const LFG_K: usize = 521;
+
+/// Value of `j` for the LFG.
 pub const LFG_J: usize = 32;
+
+/// Number of 32-bit words in the seed.
 pub const SEED_SIZE: usize = 17;
 
 /// Lagged Fibonacci generator for GC / Wii partition junk data.
 ///
 /// References (license CC0-1.0):
-/// https://github.com/dolphin-emu/dolphin/blob/a0f555648c27ec0c928f6b1e1fcad5e2d7c4d0c4/docs/WiaAndRvz.md
-/// https://github.com/dolphin-emu/dolphin/blob/a0f555648c27ec0c928f6b1e1fcad5e2d7c4d0c4/Source/Core/DiscIO/LaggedFibonacciGenerator.cpp
+/// - [WiaAndRvz.md](https://github.com/dolphin-emu/dolphin/blob/a0f555648c27ec0c928f6b1e1fcad5e2d7c4d0c4/docs/WiaAndRvz.md)
+/// - [LaggedFibonacciGenerator.cpp](https://github.com/dolphin-emu/dolphin/blob/a0f555648c27ec0c928f6b1e1fcad5e2d7c4d0c4/Source/Core/DiscIO/LaggedFibonacciGenerator.cpp)
 pub struct LaggedFibonacci {
     buffer: [u32; LFG_K],
     position: usize,
@@ -46,7 +54,6 @@ impl LaggedFibonacci {
     /// Initializes the LFG with the standard seed for a given disc ID, disc number, and sector.
     /// The partition offset is used to determine the sector and how many bytes to skip within the
     /// sector.
-    #[allow(clippy::missing_inline_in_public_items)]
     pub fn init_with_seed(&mut self, disc_id: [u8; 4], disc_num: u8, partition_offset: u64) {
         let seed = u32::from_be_bytes([
             disc_id[2],
@@ -73,10 +80,25 @@ impl LaggedFibonacci {
 
     /// Initializes the LFG with the seed read from a reader. The seed is assumed to be big-endian.
     /// This is used for rebuilding junk data in WIA/RVZ files.
-    #[allow(clippy::missing_inline_in_public_items)]
     pub fn init_with_reader<R>(&mut self, reader: &mut R) -> io::Result<()>
     where R: Read + ?Sized {
         reader.read_exact(self.buffer[..SEED_SIZE].as_mut_bytes())?;
+        for x in self.buffer[..SEED_SIZE].iter_mut() {
+            *x = u32::from_be(*x);
+        }
+        self.position = 0;
+        self.init();
+        Ok(())
+    }
+
+    /// Initializes the LFG with the seed read from a [`Buf`]. The seed is assumed to be big-endian.
+    /// This is used for rebuilding junk data in WIA/RVZ files.
+    pub fn init_with_buf(&mut self, reader: &mut impl Buf) -> io::Result<()> {
+        let out = self.buffer[..SEED_SIZE].as_mut_bytes();
+        if reader.remaining() < out.len() {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "Filling LFG seed"));
+        }
+        reader.copy_to_slice(out);
         for x in self.buffer[..SEED_SIZE].iter_mut() {
             *x = u32::from_be(*x);
         }
@@ -96,7 +118,6 @@ impl LaggedFibonacci {
     }
 
     /// Skips `n` bytes of junk data.
-    #[allow(clippy::missing_inline_in_public_items)]
     pub fn skip(&mut self, n: usize) {
         self.position += n;
         while self.position >= LFG_K * 4 {
@@ -105,8 +126,22 @@ impl LaggedFibonacci {
         }
     }
 
+    // pub fn backward(&mut self) {
+    //     for i in (LFG_J..LFG_K).rev() {
+    //         self.buffer[i] ^= self.buffer[i - LFG_J];
+    //     }
+    //     for i in (0..LFG_J).rev() {
+    //         self.buffer[i] ^= self.buffer[i + LFG_K - LFG_J];
+    //     }
+    // }
+
+    // pub fn get_seed(&mut self, seed: &mut [u8; SEED_SIZE]) {
+    //     for i in 0..SEED_SIZE {
+    //         seed[i] = self.buffer[i].to_be_bytes()[3];
+    //     }
+    // }
+
     /// Fills the buffer with junk data.
-    #[allow(clippy::missing_inline_in_public_items)]
     pub fn fill(&mut self, mut buf: &mut [u8]) {
         while !buf.is_empty() {
             let len = min(buf.len(), LFG_K * 4 - self.position);
@@ -122,7 +157,6 @@ impl LaggedFibonacci {
     }
 
     /// Writes junk data to the output stream.
-    #[allow(clippy::missing_inline_in_public_items)]
     pub fn write<W>(&mut self, w: &mut W, mut len: u64) -> io::Result<()>
     where W: Write + ?Sized {
         while len > 0 {
@@ -141,7 +175,6 @@ impl LaggedFibonacci {
 
     /// The junk data on GC / Wii discs is reinitialized every 32KB. This functions handles the
     /// wrapping logic and reinitializes the LFG at sector boundaries.
-    #[allow(clippy::missing_inline_in_public_items)]
     pub fn fill_sector_chunked(
         &mut self,
         mut buf: &mut [u8],
@@ -161,7 +194,6 @@ impl LaggedFibonacci {
 
     /// The junk data on GC / Wii discs is reinitialized every 32KB. This functions handles the
     /// wrapping logic and reinitializes the LFG at sector boundaries.
-    #[allow(clippy::missing_inline_in_public_items)]
     pub fn write_sector_chunked<W>(
         &mut self,
         w: &mut W,
@@ -181,6 +213,33 @@ impl LaggedFibonacci {
             partition_offset += write_len;
         }
         Ok(())
+    }
+
+    /// Checks if the data matches the junk data generated by the LFG. This function handles the
+    /// wrapping logic and reinitializes the LFG at sector boundaries.
+    pub fn check_sector_chunked(
+        &mut self,
+        mut buf: &[u8],
+        disc_id: [u8; 4],
+        disc_num: u8,
+        mut partition_offset: u64,
+    ) -> bool {
+        if buf.is_empty() {
+            return false;
+        }
+        let mut lfg_buf = [0u8; SECTOR_SIZE];
+        while !buf.is_empty() {
+            self.init_with_seed(disc_id, disc_num, partition_offset);
+            let len =
+                (SECTOR_SIZE - (partition_offset % SECTOR_SIZE as u64) as usize).min(buf.len());
+            self.fill(&mut lfg_buf[..len]);
+            if buf[..len] != lfg_buf[..len] {
+                return false;
+            }
+            buf = &buf[len..];
+            partition_offset += len as u64;
+        }
+        true
     }
 }
 

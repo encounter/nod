@@ -16,27 +16,42 @@ categories = ["command-line-utilities", "parser-implementations"]
 
 [features]
 default = ["compress-bzip2", "compress-lzma", "compress-zlib", "compress-zstd"]
-asm = ["sha1/asm"]
 compress-bzip2 = ["bzip2"]
-compress-lzma = ["liblzma"]
+compress-lzma = ["liblzma", "liblzma-sys"]
 compress-zlib = ["adler", "miniz_oxide"]
-compress-zstd = ["zstd"]
+compress-zstd = ["zstd", "zstd-safe"]
+openssl = ["dep:openssl"]
+openssl-vendored = ["openssl", "openssl/vendored"]
 
 [dependencies]
 adler = { version = "1.0", optional = true }
-aes = "0.8"
+aes = "0.9.0-pre.2"
 base16ct = "0.2"
+bit-set = "0.8"
+bytes = "1.8"
 bzip2 = { version = "0.4", features = ["static"], optional = true }
-cbc = "0.1"
-digest = "0.10"
+cbc = "0.2.0-pre.2"
+crc32fast = "1.4"
+crossbeam-channel = "0.5"
+crossbeam-utils = "0.8"
+digest = { workspace = true }
 dyn-clone = "1.0"
 encoding_rs = "0.8"
 itertools = "0.13"
 liblzma = { version = "0.3", features = ["static"], optional = true }
-log = "0.4"
+liblzma-sys = { version = "0.3", features = ["static"], optional = true }
+lru = "0.12"
+md-5 = { workspace = true }
+memmap2 = "0.9"
 miniz_oxide = { version = "0.8", optional = true }
+openssl = { version = "0.10", optional = true }
+rand = "0.8"
 rayon = "1.10"
-sha1 = "0.10"
-thiserror = "1.0"
-zerocopy = { version = "0.8", features = ["alloc", "derive"] }
-zstd = { version = "0.13", optional = true }
+sha1 = { workspace = true }
+simple_moving_average = "1.0"
+thiserror = "2.0"
+tracing = { workspace = true }
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+zerocopy = { workspace = true }
+zstd = { version = "0.13", optional = true, default-features = false }
+zstd-safe = { version = "7.2", optional = true, default-features = false }

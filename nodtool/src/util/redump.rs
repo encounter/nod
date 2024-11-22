@@ -8,9 +8,11 @@ use std::{
 };
 
 use hex::deserialize as deserialize_hex;
-use nod::{array_ref, Result};
+use nod::Result;
 use serde::Deserialize;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+
+use crate::util::array_ref;
 
 #[derive(Clone, Debug)]
 pub struct GameResult<'a> {

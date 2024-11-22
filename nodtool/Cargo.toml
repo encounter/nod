@@ -16,31 +16,30 @@ categories = ["command-line-utilities", "parser-implementations"]
 build = "build.rs"
 
 [features]
-asm = ["md-5/asm", "nod/asm", "sha1/asm"]
-nightly = ["crc32fast/nightly"]
+openssl = ["nod/openssl"]
+openssl-vendored = ["nod/openssl-vendored"]
+tracy = ["dep:tracing-tracy"]
 
 [dependencies]
 argp = "0.3"
-base16ct = "0.2"
 crc32fast = "1.4"
-digest = "0.10"
+digest = { workspace = true }
 enable-ansi-support = "0.2"
 hex = { version = "0.4", features = ["serde"] }
 indicatif = "0.17"
-itertools = "0.13"
-log = "0.4"
-md-5 = "0.10"
+md-5 = { workspace = true }
 nod = { version = "2.0.0-alpha", path = "../nod" }
-quick-xml = { version = "0.36", features = ["serialize"] }
+num_cpus = "1.16"
+quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
-sha1 = "0.10"
+sha1 = { workspace = true }
 size = "0.4"
 supports-color = "3.0"
-tracing = "0.1"
+tracing = { workspace = true }
 tracing-attributes = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-xxhash-rust = { version = "0.8", features = ["xxh64"] }
-zerocopy = { version = "0.8", features = ["alloc", "derive"] }
+tracing-tracy = { version = "0.11", features = ["flush-on-exit"], optional = true }
+zerocopy = { workspace = true }
 zstd = "0.13"
 
 [target.'cfg(target_env = "musl")'.dependencies]
@@ -48,7 +47,7 @@ mimalloc = "0.1"
 
 [build-dependencies]
 hex = { version = "0.4", features = ["serde"] }
-quick-xml = { version = "0.36", features = ["serialize"] }
+quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 zerocopy = { version = "0.8", features = ["alloc", "derive"] }
 zstd = "0.13"

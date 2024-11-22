@@ -1,68 +1,97 @@
 use std::{
     io,
-    io::{Read, Seek, SeekFrom},
+    io::{BufRead, Read, Seek, SeekFrom},
 };
 
 use crate::{
-    disc::SECTOR_SIZE,
-    io::{
-        block::{Block, BlockIO, DiscStream, PartitionInfo},
-        Format,
+    common::Format,
+    disc::{
+        reader::DiscReader,
+        writer::{DataCallback, DiscWriter},
+        SECTOR_SIZE,
     },
-    DiscMeta, Result, ResultContext,
+    io::block::{Block, BlockKind, BlockReader},
+    read::{DiscMeta, DiscStream},
+    util::digest::DigestManager,
+    write::{DiscFinalization, DiscWriterWeight, ProcessOptions},
+    Result, ResultContext,
 };
 
 #[derive(Clone)]
-pub struct DiscIOISO {
+pub struct BlockReaderISO {
     inner: Box<dyn DiscStream>,
-    stream_len: u64,
+    disc_size: u64,
 }
 
-impl DiscIOISO {
+impl BlockReaderISO {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
-        let stream_len = inner.seek(SeekFrom::End(0)).context("Determining stream length")?;
-        inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
-        Ok(Box::new(Self { inner, stream_len }))
+        let disc_size = inner.seek(SeekFrom::End(0)).context("Determining stream length")?;
+        Ok(Box::new(Self { inner, disc_size }))
     }
 }
 
-impl BlockIO for DiscIOISO {
-    fn read_block_internal(
-        &mut self,
-        out: &mut [u8],
-        block: u32,
-        partition: Option<&PartitionInfo>,
-    ) -> io::Result<Block> {
-        let offset = block as u64 * SECTOR_SIZE as u64;
-        if offset >= self.stream_len {
+impl BlockReader for BlockReaderISO {
+    fn read_block(&mut self, out: &mut [u8], sector: u32) -> io::Result<Block> {
+        let pos = sector as u64 * SECTOR_SIZE as u64;
+        if pos >= self.disc_size {
             // End of file
-            return Ok(Block::Zero);
+            return Ok(Block::sector(sector, BlockKind::None));
         }
 
-        self.inner.seek(SeekFrom::Start(offset))?;
-        if offset + SECTOR_SIZE as u64 > self.stream_len {
+        self.inner.seek(SeekFrom::Start(pos))?;
+        if pos + SECTOR_SIZE as u64 > self.disc_size {
             // If the last block is not a full sector, fill the rest with zeroes
-            let read = (self.stream_len - offset) as usize;
+            let read = (self.disc_size - pos) as usize;
             self.inner.read_exact(&mut out[..read])?;
             out[read..].fill(0);
         } else {
             self.inner.read_exact(out)?;
         }
 
-        match partition {
-            Some(partition) if partition.has_encryption => Ok(Block::PartEncrypted),
-            _ => Ok(Block::Raw),
-        }
+        Ok(Block::sector(sector, BlockKind::Raw))
     }
 
-    fn block_size_internal(&self) -> u32 { SECTOR_SIZE as u32 }
+    fn block_size(&self) -> u32 { SECTOR_SIZE as u32 }
 
     fn meta(&self) -> DiscMeta {
         DiscMeta {
             format: Format::Iso,
             lossless: true,
-            disc_size: Some(self.stream_len),
+            disc_size: Some(self.disc_size),
             ..Default::default()
         }
     }
+}
+
+impl DiscWriter for DiscReader {
+    fn process(
+        &self,
+        data_callback: &mut DataCallback,
+        options: &ProcessOptions,
+    ) -> Result<DiscFinalization> {
+        let mut reader = self.clone();
+        let digest = DigestManager::new(options);
+        loop {
+            let pos = reader.position();
+            let data = reader
+                .fill_buf_internal()
+                .with_context(|| format!("Reading disc data at offset {pos}"))?;
+            let len = data.len();
+            if len == 0 {
+                break;
+            }
+            // Update hashers
+            digest.send(data.clone());
+            data_callback(data, pos + len as u64, reader.disc_size())
+                .context("Failed to write disc data")?;
+            reader.consume(len);
+        }
+        let mut finalization = DiscFinalization::default();
+        finalization.apply_digests(&digest.finish());
+        Ok(finalization)
+    }
+
+    fn progress_bound(&self) -> u64 { self.disc_size() }
+
+    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Light }
 }

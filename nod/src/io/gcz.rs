@@ -2,21 +2,30 @@ use std::{
     io,
     io::{Read, Seek, SeekFrom},
     mem::size_of,
+    sync::Arc,
 };
 
 use adler::adler32_slice;
-use miniz_oxide::{inflate, inflate::core::inflate_flags};
+use bytes::{BufMut, Bytes, BytesMut};
 use zerocopy::{little_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
-use zstd::zstd_safe::WriteBuf;
 
 use crate::{
-    io::{
-        block::{Block, BlockIO, DiscStream, GCZ_MAGIC},
-        MagicBytes,
+    common::{Compression, Format, MagicBytes},
+    disc::{
+        reader::DiscReader,
+        writer::{par_process, read_block, BlockProcessor, BlockResult, DataCallback, DiscWriter},
+        SECTOR_SIZE,
     },
-    static_assert,
-    util::read::{read_box_slice, read_from},
-    Compression, DiscMeta, Error, Format, PartitionInfo, Result, ResultContext,
+    io::block::{Block, BlockKind, BlockReader, GCZ_MAGIC},
+    read::{DiscMeta, DiscStream},
+    util::{
+        compress::{Compressor, DecompressionKind, Decompressor},
+        digest::DigestManager,
+        read::{read_arc_slice, read_from},
+        static_assert,
+    },
+    write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    Error, Result, ResultContext,
 };
 
 /// GCZ header (little endian)
@@ -33,16 +42,17 @@ struct GCZHeader {
 
 static_assert!(size_of::<GCZHeader>() == 32);
 
-pub struct DiscIOGCZ {
+pub struct BlockReaderGCZ {
     inner: Box<dyn DiscStream>,
     header: GCZHeader,
-    block_map: Box<[U64]>,
-    block_hashes: Box<[U32]>,
+    block_map: Arc<[U64]>,
+    block_hashes: Arc<[U32]>,
     block_buf: Box<[u8]>,
     data_offset: u64,
+    decompressor: Decompressor,
 }
 
-impl Clone for DiscIOGCZ {
+impl Clone for BlockReaderGCZ {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -51,11 +61,12 @@ impl Clone for DiscIOGCZ {
             block_hashes: self.block_hashes.clone(),
             block_buf: <[u8]>::new_box_zeroed_with_elems(self.block_buf.len()).unwrap(),
             data_offset: self.data_offset,
+            decompressor: self.decompressor.clone(),
         }
     }
 }
 
-impl DiscIOGCZ {
+impl BlockReaderGCZ {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
         // Read header
         inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
@@ -66,41 +77,50 @@ impl DiscIOGCZ {
 
         // Read block map and hashes
         let block_count = header.block_count.get();
-        let block_map = read_box_slice(inner.as_mut(), block_count as usize)
+        let block_map = read_arc_slice(inner.as_mut(), block_count as usize)
             .context("Reading GCZ block map")?;
-        let block_hashes = read_box_slice(inner.as_mut(), block_count as usize)
+        let block_hashes = read_arc_slice(inner.as_mut(), block_count as usize)
             .context("Reading GCZ block hashes")?;
 
         // header + block_count * (u64 + u32)
         let data_offset = size_of::<GCZHeader>() as u64 + block_count as u64 * 12;
         let block_buf = <[u8]>::new_box_zeroed_with_elems(header.block_size.get() as usize)?;
-        Ok(Box::new(Self { inner, header, block_map, block_hashes, block_buf, data_offset }))
+        let decompressor = Decompressor::new(DecompressionKind::Deflate);
+        Ok(Box::new(Self {
+            inner,
+            header,
+            block_map,
+            block_hashes,
+            block_buf,
+            data_offset,
+            decompressor,
+        }))
     }
 }
 
-impl BlockIO for DiscIOGCZ {
-    fn read_block_internal(
-        &mut self,
-        out: &mut [u8],
-        block: u32,
-        partition: Option<&PartitionInfo>,
-    ) -> io::Result<Block> {
-        if block >= self.header.block_count.get() {
+impl BlockReader for BlockReaderGCZ {
+    fn read_block(&mut self, out: &mut [u8], sector: u32) -> io::Result<Block> {
+        let block_size = self.header.block_size.get();
+        let block_idx = ((sector as u64 * SECTOR_SIZE as u64) / block_size as u64) as u32;
+        if block_idx >= self.header.block_count.get() {
             // Out of bounds
-            return Ok(Block::Zero);
+            return Ok(Block::new(block_idx, block_size, BlockKind::None));
         }
 
         // Find block offset and size
-        let mut file_offset = self.block_map[block as usize].get();
+        let mut file_offset = self.block_map[block_idx as usize].get();
         let mut compressed = true;
         if file_offset & (1 << 63) != 0 {
             file_offset &= !(1 << 63);
             compressed = false;
         }
-        let compressed_size =
-            ((self.block_map.get(block as usize + 1).unwrap_or(&self.header.compressed_size).get()
-                & !(1 << 63))
-                - file_offset) as usize;
+        let compressed_size = ((self
+            .block_map
+            .get(block_idx as usize + 1)
+            .unwrap_or(&self.header.compressed_size)
+            .get()
+            & !(1 << 63))
+            - file_offset) as usize;
         if compressed_size > self.block_buf.len() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -127,62 +147,218 @@ impl BlockIO for DiscIOGCZ {
 
         // Verify block checksum
         let checksum = adler32_slice(&self.block_buf[..compressed_size]);
-        let expected_checksum = self.block_hashes[block as usize].get();
+        let expected_checksum = self.block_hashes[block_idx as usize].get();
         if checksum != expected_checksum {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "Block checksum mismatch: {:#010x} != {:#010x}",
-                    checksum, expected_checksum
+                    "Block {} checksum mismatch: {:#010x} != {:#010x}",
+                    block_idx, checksum, expected_checksum
                 ),
             ));
         }
 
         if compressed {
             // Decompress block
-            let mut decompressor = inflate::core::DecompressorOxide::new();
-            let input = &self.block_buf[..compressed_size];
-            let (status, in_size, out_size) = inflate::core::decompress(
-                &mut decompressor,
-                input,
-                out,
-                0,
-                inflate_flags::TINFL_FLAG_PARSE_ZLIB_HEADER
-                    | inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
-            );
-            if status != inflate::TINFLStatus::Done
-                || in_size != compressed_size
-                || out_size != self.block_buf.len()
-            {
+            let out_len = self.decompressor.decompress(&self.block_buf[..compressed_size], out)?;
+            if out_len != block_size as usize {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "Deflate decompression failed: {:?} (in: {}, out: {})",
-                        status, in_size, out_size
+                        "Block {} decompression failed: in: {}, out: {}",
+                        block_idx, compressed_size, out_len
                     ),
                 ));
             }
         } else {
             // Copy uncompressed block
-            out.copy_from_slice(self.block_buf.as_slice());
+            out.copy_from_slice(self.block_buf.as_ref());
         }
 
-        match partition {
-            Some(partition) if partition.has_encryption => Ok(Block::PartEncrypted),
-            _ => Ok(Block::Raw),
-        }
+        Ok(Block::new(block_idx, block_size, BlockKind::Raw))
     }
 
-    fn block_size_internal(&self) -> u32 { self.header.block_size.get() }
+    fn block_size(&self) -> u32 { self.header.block_size.get() }
 
     fn meta(&self) -> DiscMeta {
         DiscMeta {
             format: Format::Gcz,
-            compression: Compression::Deflate,
+            compression: Compression::Deflate(0),
             block_size: Some(self.header.block_size.get()),
             lossless: true,
             disc_size: Some(self.header.disc_size.get()),
             ..Default::default()
         }
     }
+}
+
+struct BlockProcessorGCZ {
+    inner: DiscReader,
+    header: GCZHeader,
+    compressor: Compressor,
+}
+
+impl Clone for BlockProcessorGCZ {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            header: self.header.clone(),
+            compressor: self.compressor.clone(),
+        }
+    }
+}
+
+struct BlockMetaGCZ {
+    is_compressed: bool,
+    block_hash: u32,
+}
+
+impl BlockProcessor for BlockProcessorGCZ {
+    type BlockMeta = BlockMetaGCZ;
+
+    fn process_block(&mut self, block_idx: u32) -> io::Result<BlockResult<Self::BlockMeta>> {
+        let block_size = self.header.block_size.get();
+        self.inner.seek(SeekFrom::Start(block_idx as u64 * block_size as u64))?;
+        let (mut block_data, disc_data) = read_block(&mut self.inner, block_size as usize)?;
+
+        // Try to compress block
+        let is_compressed = if self.compressor.compress(&block_data)? {
+            println!("Compressed block {} to {}", block_idx, self.compressor.buffer.len());
+            block_data = Bytes::copy_from_slice(self.compressor.buffer.as_slice());
+            true
+        } else {
+            false
+        };
+
+        let block_hash = adler32_slice(block_data.as_ref());
+        Ok(BlockResult {
+            block_idx,
+            disc_data,
+            block_data,
+            meta: BlockMetaGCZ { is_compressed, block_hash },
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct DiscWriterGCZ {
+    inner: DiscReader,
+    header: GCZHeader,
+    compression: Compression,
+}
+
+pub const DEFAULT_BLOCK_SIZE: u32 = 0x8000; // 32 KiB
+
+// Level 0 will be converted to the default level in [`Compression::validate_level`]
+pub const DEFAULT_COMPRESSION: Compression = Compression::Deflate(0);
+
+impl DiscWriterGCZ {
+    pub fn new(inner: DiscReader, options: &FormatOptions) -> Result<Box<dyn DiscWriter>> {
+        if options.format != Format::Gcz {
+            return Err(Error::DiscFormat("Invalid format for GCZ writer".to_string()));
+        }
+        if !matches!(options.compression, Compression::Deflate(_)) {
+            return Err(Error::DiscFormat(format!(
+                "Unsupported compression for GCZ: {:?}",
+                options.compression
+            )));
+        }
+
+        let block_size = options.block_size;
+        if block_size < SECTOR_SIZE as u32 || block_size % SECTOR_SIZE as u32 != 0 {
+            return Err(Error::DiscFormat("Invalid block size for GCZ".to_string()));
+        }
+
+        let disc_header = inner.header();
+        let disc_size = inner.disc_size();
+        let block_count = disc_size.div_ceil(block_size as u64) as u32;
+
+        // Generate header
+        let header = GCZHeader {
+            magic: GCZ_MAGIC,
+            disc_type: if disc_header.is_wii() { 1 } else { 0 }.into(),
+            compressed_size: 0.into(), // Written when finalized
+            disc_size: disc_size.into(),
+            block_size: block_size.into(),
+            block_count: block_count.into(),
+        };
+
+        Ok(Box::new(Self { inner, header, compression: options.compression }))
+    }
+}
+
+impl DiscWriter for DiscWriterGCZ {
+    fn process(
+        &self,
+        data_callback: &mut DataCallback,
+        options: &ProcessOptions,
+    ) -> Result<DiscFinalization> {
+        let disc_size = self.header.disc_size.get();
+        let block_size = self.header.block_size.get();
+        let block_count = self.header.block_count.get();
+
+        // Create hashers
+        let digest = DigestManager::new(options);
+
+        // Generate block map and hashes
+        let mut block_map = <[U64]>::new_box_zeroed_with_elems(block_count as usize)?;
+        let mut block_hashes = <[U32]>::new_box_zeroed_with_elems(block_count as usize)?;
+
+        let header_data_size = size_of::<GCZHeader>()
+            + size_of_val(block_map.as_ref())
+            + size_of_val(block_hashes.as_ref());
+        let mut header_data = BytesMut::with_capacity(header_data_size);
+        header_data.put_slice(self.header.as_bytes());
+        header_data.resize(header_data_size, 0);
+        data_callback(header_data.freeze(), 0, disc_size).context("Failed to write GCZ header")?;
+
+        let mut input_position = 0;
+        let mut data_position = 0;
+        par_process(
+            || BlockProcessorGCZ {
+                inner: self.inner.clone(),
+                header: self.header.clone(),
+                compressor: Compressor::new(self.compression, block_size as usize),
+            },
+            block_count,
+            options.processor_threads,
+            |block| {
+                // Update hashers
+                let disc_data_len = block.disc_data.len() as u64;
+                digest.send(block.disc_data);
+
+                // Update block map and hash
+                if block.meta.is_compressed {
+                    block_map[block.block_idx as usize] = data_position.into();
+                } else {
+                    block_map[block.block_idx as usize] = (data_position | (1 << 63)).into();
+                }
+                block_hashes[block.block_idx as usize] = block.meta.block_hash.into();
+
+                // Write block data
+                input_position += disc_data_len;
+                data_position += block.block_data.len() as u64;
+                data_callback(block.block_data, input_position, disc_size)
+                    .with_context(|| format!("Failed to write block {}", block.block_idx))?;
+                Ok(())
+            },
+        )?;
+
+        // Write updated header, block map and hashes
+        let mut header = self.header.clone();
+        header.compressed_size = data_position.into();
+        let mut header_data = BytesMut::with_capacity(header_data_size);
+        header_data.extend_from_slice(header.as_bytes());
+        header_data.extend_from_slice(block_map.as_bytes());
+        header_data.extend_from_slice(block_hashes.as_bytes());
+
+        let mut finalization =
+            DiscFinalization { header: header_data.freeze(), ..Default::default() };
+        finalization.apply_digests(&digest.finish());
+        Ok(finalization)
+    }
+
+    fn progress_bound(&self) -> u64 { self.header.disc_size.get() }
+
+    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Heavy }
 }

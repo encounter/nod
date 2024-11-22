@@ -8,7 +8,7 @@ use std::{
     path::{Path, MAIN_SEPARATOR},
 };
 
-pub fn display(path: &Path) -> PathDisplay { PathDisplay { path } }
+pub fn path_display(path: &Path) -> PathDisplay { PathDisplay { path } }
 
 pub struct PathDisplay<'a> {
     path: &'a Path,
@@ -19,7 +19,7 @@ impl fmt::Display for PathDisplay<'_> {
         let mut first = true;
         for segment in self.path.iter() {
             let segment_str = segment.to_string_lossy();
-            if segment_str == "." {
+            if segment_str == "/" || segment_str == "." {
                 continue;
             }
             if first {
@@ -39,3 +39,15 @@ pub fn has_extension(filename: &Path, extension: &str) -> bool {
         None => false,
     }
 }
+
+/// Creates a fixed-size array reference from a slice.
+macro_rules! array_ref {
+    ($slice:expr, $offset:expr, $size:expr) => {{
+        #[inline(always)]
+        fn to_array<T>(slice: &[T]) -> &[T; $size] {
+            unsafe { &*(slice.as_ptr() as *const [_; $size]) }
+        }
+        to_array(&$slice[$offset..$offset + $size])
+    }};
+}
+pub(crate) use array_ref;

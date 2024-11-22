@@ -1,130 +1,163 @@
 use std::{
     io,
-    io::{BufRead, Read, Seek, SeekFrom},
+    io::{BufRead, Seek, SeekFrom},
+    sync::Arc,
 };
 
-use zerocopy::{FromBytes, FromZeros};
+use bytes::Bytes;
+use tracing::warn;
+use zerocopy::IntoBytes;
 
-use super::{
-    gcn::PartitionGC,
-    hashes::{rebuild_hashes, HashTable},
-    wii::{PartitionWii, WiiPartEntry, WiiPartGroup, WiiPartitionHeader, WII_PART_GROUP_OFF},
-    DiscHeader, PartitionBase, PartitionHeader, PartitionKind, DL_DVD_SIZE, MINI_DVD_SIZE,
-    REGION_SIZE, SL_DVD_SIZE,
-};
 use crate::{
-    disc::wii::REGION_OFFSET,
-    io::block::{Block, BlockIO, PartitionInfo},
-    util::read::{read_box, read_from, read_vec},
-    DiscMeta, Error, OpenOptions, PartitionEncryptionMode, PartitionOptions, Result, ResultContext,
-    SECTOR_SIZE,
+    common::{PartitionInfo, PartitionKind},
+    disc::{
+        direct::{DirectDiscReader, DirectDiscReaderMode},
+        fst::{Fst, NodeKind},
+        gcn::{read_fst, PartitionReaderGC},
+        preloader::{Preloader, SectorGroup, SectorGroupLoader, SectorGroupRequest},
+        wii::{
+            PartitionReaderWii, WiiPartEntry, WiiPartGroup, WiiPartitionHeader, REGION_OFFSET,
+            REGION_SIZE, WII_PART_GROUP_OFF,
+        },
+        DiscHeader, DL_DVD_SIZE, MINI_DVD_SIZE, SECTOR_GROUP_SIZE, SECTOR_SIZE, SL_DVD_SIZE,
+    },
+    io::block::BlockReader,
+    read::{DiscMeta, DiscOptions, PartitionEncryption, PartitionOptions, PartitionReader},
+    util::{
+        impl_read_for_bufread,
+        read::{read_arc, read_from, read_vec},
+    },
+    Error, Result, ResultContext,
 };
 
 pub struct DiscReader {
-    io: Box<dyn BlockIO>,
-    block: Block,
-    block_buf: Box<[u8]>,
-    block_idx: u32,
-    sector_buf: Box<[u8; SECTOR_SIZE]>,
-    sector_idx: u32,
+    io: Box<dyn BlockReader>,
     pos: u64,
-    mode: PartitionEncryptionMode,
-    disc_header: Box<DiscHeader>,
-    pub(crate) partitions: Vec<PartitionInfo>,
-    hash_tables: Vec<HashTable>,
+    size: u64,
+    mode: PartitionEncryption,
+    disc_header: Arc<DiscHeader>,
+    partitions: Arc<[PartitionInfo]>,
     region: Option<[u8; REGION_SIZE]>,
+    sector_group: Option<SectorGroup>,
+    preloader: Arc<Preloader>,
+    alt_disc_header: Option<Arc<DiscHeader>>,
+    alt_partitions: Option<Arc<[PartitionInfo]>>,
 }
 
 impl Clone for DiscReader {
     fn clone(&self) -> Self {
         Self {
             io: self.io.clone(),
-            block: Block::default(),
-            block_buf: <[u8]>::new_box_zeroed_with_elems(self.block_buf.len()).unwrap(),
-            block_idx: u32::MAX,
-            sector_buf: <[u8; SECTOR_SIZE]>::new_box_zeroed().unwrap(),
-            sector_idx: u32::MAX,
             pos: 0,
+            size: self.size,
             mode: self.mode,
             disc_header: self.disc_header.clone(),
             partitions: self.partitions.clone(),
-            hash_tables: self.hash_tables.clone(),
             region: self.region,
+            sector_group: None,
+            preloader: self.preloader.clone(),
+            alt_disc_header: self.alt_disc_header.clone(),
+            alt_partitions: self.alt_partitions.clone(),
         }
     }
 }
 
 impl DiscReader {
-    pub fn new(inner: Box<dyn BlockIO>, options: &OpenOptions) -> Result<Self> {
-        let block_size = inner.block_size();
-        let meta = inner.meta();
-        let mut reader = Self {
-            io: inner,
-            block: Block::default(),
-            block_buf: <[u8]>::new_box_zeroed_with_elems(block_size as usize)?,
-            block_idx: u32::MAX,
-            sector_buf: <[u8; SECTOR_SIZE]>::new_box_zeroed()?,
-            sector_idx: u32::MAX,
-            pos: 0,
-            mode: options.partition_encryption,
-            disc_header: DiscHeader::new_box_zeroed()?,
-            partitions: vec![],
-            hash_tables: vec![],
-            region: None,
-        };
-        let disc_header: Box<DiscHeader> = read_box(&mut reader).context("Reading disc header")?;
-        reader.disc_header = disc_header;
-        if reader.disc_header.is_wii() {
-            if reader.disc_header.has_partition_encryption()
-                && !reader.disc_header.has_partition_hashes()
-            {
+    pub fn new(inner: Box<dyn BlockReader>, options: &DiscOptions) -> Result<Self> {
+        let mut reader = DirectDiscReader::new(inner)?;
+
+        let disc_header: Arc<DiscHeader> = read_arc(&mut reader).context("Reading disc header")?;
+        let mut alt_disc_header = None;
+        let mut region = None;
+        let mut partitions = Arc::<[PartitionInfo]>::default();
+        let mut alt_partitions = None;
+        if disc_header.is_wii() {
+            // Sanity check
+            if disc_header.has_partition_encryption() && !disc_header.has_partition_hashes() {
                 return Err(Error::DiscFormat(
                     "Wii disc is encrypted but has no partition hashes".to_string(),
                 ));
             }
-            if !reader.disc_header.has_partition_hashes()
-                && options.partition_encryption == PartitionEncryptionMode::ForceEncrypted
+            if !disc_header.has_partition_hashes()
+                && options.partition_encryption == PartitionEncryption::ForceEncrypted
             {
                 return Err(Error::Other(
                     "Unsupported: Rebuilding encryption for Wii disc without hashes".to_string(),
                 ));
             }
+
+            // Read region info
             reader.seek(SeekFrom::Start(REGION_OFFSET)).context("Seeking to region info")?;
-            reader.region = Some(read_from(&mut reader).context("Reading region info")?);
-            reader.partitions = read_partition_info(&mut reader)?;
-            // Rebuild hashes if the format requires it
-            if options.partition_encryption != PartitionEncryptionMode::AsIs
-                && meta.needs_hash_recovery
-                && reader.disc_header.has_partition_hashes()
-            {
-                rebuild_hashes(&mut reader)?;
+            region = Some(read_from(&mut reader).context("Reading region info")?);
+
+            // Read partition info
+            partitions = Arc::from(read_partition_info(&mut reader, disc_header.clone())?);
+
+            // Update disc header with encryption mode
+            if matches!(
+                options.partition_encryption,
+                PartitionEncryption::ForceDecrypted | PartitionEncryption::ForceEncrypted
+            ) {
+                let mut disc_header = Box::new(disc_header.as_ref().clone());
+                let mut partitions = Box::<[PartitionInfo]>::from(partitions.as_ref());
+                disc_header.no_partition_encryption = match options.partition_encryption {
+                    PartitionEncryption::ForceDecrypted => 1,
+                    PartitionEncryption::ForceEncrypted => 0,
+                    _ => unreachable!(),
+                };
+                for partition in &mut partitions {
+                    partition.has_encryption = disc_header.has_partition_encryption();
+                }
+                alt_disc_header = Some(Arc::from(disc_header));
+                alt_partitions = Some(Arc::from(partitions));
             }
+        } else if !disc_header.is_gamecube() {
+            return Err(Error::DiscFormat("Invalid disc header".to_string()));
         }
-        reader.reset();
-        Ok(reader)
-    }
 
-    pub fn reset(&mut self) {
-        self.block = Block::default();
-        self.block_buf.fill(0);
-        self.block_idx = u32::MAX;
-        self.sector_buf.fill(0);
-        self.sector_idx = u32::MAX;
-        self.pos = 0;
-    }
-
-    pub fn disc_size(&self) -> u64 {
-        self.io.meta().disc_size.unwrap_or_else(|| guess_disc_size(&self.partitions))
+        // Calculate disc size
+        let io = reader.into_inner();
+        let size = io.meta().disc_size.unwrap_or_else(|| guess_disc_size(&partitions));
+        let preloader = Preloader::new(
+            SectorGroupLoader::new(io.clone(), disc_header.clone(), partitions.clone()),
+            options.preloader_threads,
+        );
+        Ok(Self {
+            io,
+            pos: 0,
+            size,
+            mode: options.partition_encryption,
+            disc_header,
+            partitions,
+            region,
+            sector_group: None,
+            preloader,
+            alt_disc_header,
+            alt_partitions,
+        })
     }
 
     #[inline]
-    pub fn header(&self) -> &DiscHeader { &self.disc_header }
+    pub fn reset(&mut self) { self.pos = 0; }
+
+    #[inline]
+    pub fn position(&self) -> u64 { self.pos }
+
+    #[inline]
+    pub fn disc_size(&self) -> u64 { self.size }
+
+    #[inline]
+    pub fn header(&self) -> &DiscHeader {
+        self.alt_disc_header.as_ref().unwrap_or(&self.disc_header)
+    }
 
     #[inline]
     pub fn region(&self) -> Option<&[u8; REGION_SIZE]> { self.region.as_ref() }
 
     #[inline]
-    pub fn partitions(&self) -> &[PartitionInfo] { &self.partitions }
+    pub fn partitions(&self) -> &[PartitionInfo] {
+        self.alt_partitions.as_deref().unwrap_or(&self.partitions)
+    }
 
     #[inline]
     pub fn meta(&self) -> DiscMeta { self.io.meta() }
@@ -134,15 +167,19 @@ impl DiscReader {
         &self,
         index: usize,
         options: &PartitionOptions,
-    ) -> Result<Box<dyn PartitionBase>> {
+    ) -> Result<Box<dyn PartitionReader>> {
         if self.disc_header.is_gamecube() {
             if index == 0 {
-                Ok(PartitionGC::new(self.io.clone(), self.disc_header.clone())?)
+                Ok(PartitionReaderGC::new(
+                    self.io.clone(),
+                    self.preloader.clone(),
+                    self.disc_size(),
+                )?)
             } else {
                 Err(Error::DiscFormat("GameCube discs only have one partition".to_string()))
             }
         } else if let Some(part) = self.partitions.get(index) {
-            Ok(PartitionWii::new(self.io.clone(), self.disc_header.clone(), part, options)?)
+            Ok(PartitionReaderWii::new(self.io.clone(), self.preloader.clone(), part, options)?)
         } else {
             Err(Error::DiscFormat(format!("Partition {index} not found")))
         }
@@ -154,108 +191,151 @@ impl DiscReader {
         &self,
         kind: PartitionKind,
         options: &PartitionOptions,
-    ) -> Result<Box<dyn PartitionBase>> {
+    ) -> Result<Box<dyn PartitionReader>> {
         if self.disc_header.is_gamecube() {
             if kind == PartitionKind::Data {
-                Ok(PartitionGC::new(self.io.clone(), self.disc_header.clone())?)
+                Ok(PartitionReaderGC::new(
+                    self.io.clone(),
+                    self.preloader.clone(),
+                    self.disc_size(),
+                )?)
             } else {
                 Err(Error::DiscFormat("GameCube discs only have a data partition".to_string()))
             }
         } else if let Some(part) = self.partitions.iter().find(|v| v.kind == kind) {
-            Ok(PartitionWii::new(self.io.clone(), self.disc_header.clone(), part, options)?)
+            Ok(PartitionReaderWii::new(self.io.clone(), self.preloader.clone(), part, options)?)
         } else {
             Err(Error::DiscFormat(format!("Partition type {kind} not found")))
         }
+    }
+
+    pub fn fill_buf_internal(&mut self) -> io::Result<Bytes> {
+        if self.pos >= self.size {
+            return Ok(Bytes::new());
+        }
+
+        // Read from modified disc header
+        if self.pos < size_of::<DiscHeader>() as u64 {
+            if let Some(alt_disc_header) = &self.alt_disc_header {
+                return Ok(Bytes::copy_from_slice(
+                    &alt_disc_header.as_bytes()[self.pos as usize..],
+                ));
+            }
+        }
+
+        // Build sector group request
+        let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
+        let (request, abs_group_sector, max_groups) = if let Some(partition) =
+            self.partitions.iter().find(|part| part.data_contains_sector(abs_sector))
+        {
+            let group_idx = (abs_sector - partition.data_start_sector) / 64;
+            let abs_group_sector = partition.data_start_sector + group_idx * 64;
+            let max_groups = (partition.data_end_sector - partition.data_start_sector).div_ceil(64);
+            let request = SectorGroupRequest {
+                group_idx,
+                partition_idx: Some(partition.index as u8),
+                mode: self.mode,
+            };
+            (request, abs_group_sector, max_groups)
+        } else {
+            let group_idx = abs_sector / 64;
+            let abs_group_sector = group_idx * 64;
+            let max_groups = self.size.div_ceil(SECTOR_GROUP_SIZE as u64) as u32;
+            let request = SectorGroupRequest { group_idx, partition_idx: None, mode: self.mode };
+            (request, abs_group_sector, max_groups)
+        };
+
+        // Load sector group
+        let sector_group = if matches!(&self.sector_group, Some(sector_group) if sector_group.request == request)
+        {
+            // We can improve this in Rust 2024 with `if_let_rescope`
+            // https://github.com/rust-lang/rust/issues/124085
+            self.sector_group.as_ref().unwrap()
+        } else {
+            self.sector_group.insert(self.preloader.fetch(request, max_groups)?)
+        };
+
+        // Calculate the number of consecutive sectors in the group
+        let group_sector = abs_sector - abs_group_sector;
+        let consecutive_sectors = sector_group.consecutive_sectors(group_sector);
+        if consecutive_sectors == 0 {
+            return Ok(Bytes::new());
+        }
+        let num_sectors = group_sector + consecutive_sectors;
+
+        // Read from sector group buffer
+        let group_start = abs_group_sector as u64 * SECTOR_SIZE as u64;
+        let offset = (self.pos - group_start) as usize;
+        let end = (num_sectors as u64 * SECTOR_SIZE as u64).min(self.size - group_start) as usize;
+        Ok(sector_group.data.slice(offset..end))
     }
 }
 
 impl BufRead for DiscReader {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        let block_idx = (self.pos / self.block_buf.len() as u64) as u32;
-        let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
+        if self.pos >= self.size {
+            return Ok(&[]);
+        }
 
-        let partition = if self.disc_header.is_wii() {
-            self.partitions.iter().find(|part| {
-                abs_sector >= part.data_start_sector && abs_sector < part.data_end_sector
-            })
+        // Read from modified disc header
+        if self.pos < size_of::<DiscHeader>() as u64 {
+            if let Some(alt_disc_header) = &self.alt_disc_header {
+                return Ok(&alt_disc_header.as_bytes()[self.pos as usize..]);
+            }
+        }
+
+        // Build sector group request
+        let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
+        let (request, abs_group_sector, max_groups) = if let Some(partition) =
+            self.partitions.iter().find(|part| part.data_contains_sector(abs_sector))
+        {
+            let group_idx = (abs_sector - partition.data_start_sector) / 64;
+            let abs_group_sector = partition.data_start_sector + group_idx * 64;
+            let max_groups = (partition.data_end_sector - partition.data_start_sector).div_ceil(64);
+            let request = SectorGroupRequest {
+                group_idx,
+                partition_idx: Some(partition.index as u8),
+                mode: self.mode,
+            };
+            (request, abs_group_sector, max_groups)
         } else {
-            None
+            let group_idx = abs_sector / 64;
+            let abs_group_sector = group_idx * 64;
+            let max_groups = self.size.div_ceil(SECTOR_GROUP_SIZE as u64) as u32;
+            let request = SectorGroupRequest { group_idx, partition_idx: None, mode: self.mode };
+            (request, abs_group_sector, max_groups)
         };
 
-        // Read new block
-        if block_idx != self.block_idx {
-            self.block = self.io.read_block(self.block_buf.as_mut(), block_idx, partition)?;
-            self.block_idx = block_idx;
+        // Load sector group
+        let sector_group = if matches!(&self.sector_group, Some(sector_group) if sector_group.request == request)
+        {
+            // We can improve this in Rust 2024 with `if_let_rescope`
+            // https://github.com/rust-lang/rust/issues/124085
+            self.sector_group.as_ref().unwrap()
+        } else {
+            self.sector_group.insert(self.preloader.fetch(request, max_groups)?)
+        };
+
+        // Calculate the number of consecutive sectors in the group
+        let group_sector = abs_sector - abs_group_sector;
+        let consecutive_sectors = sector_group.consecutive_sectors(group_sector);
+        if consecutive_sectors == 0 {
+            return Ok(&[]);
         }
+        let num_sectors = group_sector + consecutive_sectors;
 
-        // Read new sector into buffer
-        if abs_sector != self.sector_idx {
-            match (self.mode, partition, self.disc_header.has_partition_encryption()) {
-                (PartitionEncryptionMode::Original, Some(partition), true)
-                | (PartitionEncryptionMode::ForceEncrypted, Some(partition), _) => {
-                    self.block.encrypt(
-                        self.sector_buf.as_mut(),
-                        self.block_buf.as_ref(),
-                        abs_sector,
-                        partition,
-                    )?;
-                }
-                (PartitionEncryptionMode::ForceDecrypted, Some(partition), _) => {
-                    self.block.decrypt(
-                        self.sector_buf.as_mut(),
-                        self.block_buf.as_ref(),
-                        abs_sector,
-                        partition,
-                    )?;
-                }
-                (PartitionEncryptionMode::AsIs, _, _) | (_, None, _) | (_, _, false) => {
-                    self.block.copy_raw(
-                        self.sector_buf.as_mut(),
-                        self.block_buf.as_ref(),
-                        abs_sector,
-                        &self.disc_header,
-                    )?;
-                }
-            }
-            self.sector_idx = abs_sector;
-
-            if self.sector_idx == 0
-                && self.disc_header.is_wii()
-                && matches!(
-                    self.mode,
-                    PartitionEncryptionMode::ForceDecrypted
-                        | PartitionEncryptionMode::ForceEncrypted
-                )
-            {
-                let (disc_header, _) = DiscHeader::mut_from_prefix(self.sector_buf.as_mut())
-                    .expect("Invalid disc header alignment");
-                disc_header.no_partition_encryption = match self.mode {
-                    PartitionEncryptionMode::ForceDecrypted => 1,
-                    PartitionEncryptionMode::ForceEncrypted => 0,
-                    _ => unreachable!(),
-                };
-            }
-        }
-
-        // Read from sector buffer
-        let offset = (self.pos % SECTOR_SIZE as u64) as usize;
-        Ok(&self.sector_buf[offset..])
+        // Read from sector group buffer
+        let group_start = abs_group_sector as u64 * SECTOR_SIZE as u64;
+        let offset = (self.pos - group_start) as usize;
+        let end = (num_sectors as u64 * SECTOR_SIZE as u64).min(self.size - group_start) as usize;
+        Ok(&sector_group.data[offset..end])
     }
 
     #[inline]
     fn consume(&mut self, amt: usize) { self.pos += amt as u64; }
 }
 
-impl Read for DiscReader {
-    #[inline]
-    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        let buf = self.fill_buf()?;
-        let len = buf.len().min(out.len());
-        out[..len].copy_from_slice(&buf[..len]);
-        self.consume(len);
-        Ok(len)
-    }
-}
+impl_read_for_bufread!(DiscReader);
 
 impl Seek for DiscReader {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
@@ -273,7 +353,10 @@ impl Seek for DiscReader {
     }
 }
 
-fn read_partition_info(reader: &mut DiscReader) -> Result<Vec<PartitionInfo>> {
+fn read_partition_info(
+    reader: &mut DirectDiscReader,
+    disc_header: Arc<DiscHeader>,
+) -> Result<Vec<PartitionInfo>> {
     reader.seek(SeekFrom::Start(WII_PART_GROUP_OFF)).context("Seeking to partition groups")?;
     let part_groups: [WiiPartGroup; 4] = read_from(reader).context("Reading partition groups")?;
     let mut part_info = Vec::new();
@@ -292,7 +375,7 @@ fn read_partition_info(reader: &mut DiscReader) -> Result<Vec<PartitionInfo>> {
             reader
                 .seek(SeekFrom::Start(offset))
                 .with_context(|| format!("Seeking to partition data {group_idx}:{part_idx}"))?;
-            let header: Box<WiiPartitionHeader> = read_box(reader)
+            let header: Arc<WiiPartitionHeader> = read_arc(reader)
                 .with_context(|| format!("Reading partition header {group_idx}:{part_idx}"))?;
 
             let key = header.ticket.decrypt_title_key()?;
@@ -303,17 +386,8 @@ fn read_partition_info(reader: &mut DiscReader) -> Result<Vec<PartitionInfo>> {
                 )));
             }
 
-            let disc_header = reader.header();
             let data_start_offset = entry.offset() + header.data_off();
-            let mut data_size = header.data_size();
-            if data_size == 0 {
-                // Read until next partition or end of disc
-                // TODO: handle multiple partition groups
-                data_size = entries
-                    .get(part_idx + 1)
-                    .map(|part| part.offset() - data_start_offset)
-                    .unwrap_or(reader.disc_size() - data_start_offset);
-            }
+            let data_size = header.data_size();
             let data_end_offset = data_start_offset + data_size;
             if data_start_offset % SECTOR_SIZE as u64 != 0
                 || data_end_offset % SECTOR_SIZE as u64 != 0
@@ -322,32 +396,58 @@ fn read_partition_info(reader: &mut DiscReader) -> Result<Vec<PartitionInfo>> {
                     "Partition {group_idx}:{part_idx} data is not sector aligned",
                 )));
             }
-            let mut info = PartitionInfo {
+            let start_sector = (start_offset / SECTOR_SIZE as u64) as u32;
+            let data_start_sector = (data_start_offset / SECTOR_SIZE as u64) as u32;
+            let mut data_end_sector = (data_end_offset / SECTOR_SIZE as u64) as u32;
+
+            reader.reset(DirectDiscReaderMode::Partition {
+                disc_header: disc_header.clone(),
+                data_start_sector,
+                key,
+            });
+            let partition_disc_header: Arc<DiscHeader> =
+                read_arc(reader).context("Reading partition disc header")?;
+            let partition_header = read_arc(reader).context("Reading partition header")?;
+            if partition_disc_header.is_wii() {
+                let raw_fst = read_fst(reader, &partition_header, true)?;
+                let fst = Fst::new(&raw_fst)?;
+                let max_fst_offset = fst
+                    .nodes
+                    .iter()
+                    .filter_map(|n| match n.kind() {
+                        NodeKind::File => Some(n.offset(true) + n.length() as u64),
+                        _ => None,
+                    })
+                    .max()
+                    .unwrap_or(0);
+                if max_fst_offset > data_size {
+                    if data_size == 0 {
+                        // Guess data size for decrypted partitions
+                        data_end_sector = max_fst_offset.div_ceil(SECTOR_SIZE as u64) as u32;
+                    } else {
+                        return Err(Error::DiscFormat(format!(
+                            "Partition {group_idx}:{part_idx} FST exceeds data size",
+                        )));
+                    }
+                }
+            } else {
+                warn!("Partition {group_idx}:{part_idx} is not valid");
+            }
+            reader.reset(DirectDiscReaderMode::Raw);
+
+            part_info.push(PartitionInfo {
                 index: part_info.len(),
                 kind: entry.kind.get().into(),
-                start_sector: (start_offset / SECTOR_SIZE as u64) as u32,
-                data_start_sector: (data_start_offset / SECTOR_SIZE as u64) as u32,
-                data_end_sector: (data_end_offset / SECTOR_SIZE as u64) as u32,
+                start_sector,
+                data_start_sector,
+                data_end_sector,
                 key,
                 header,
-                disc_header: DiscHeader::new_box_zeroed()?,
-                partition_header: PartitionHeader::new_box_zeroed()?,
-                hash_table: None,
+                disc_header: partition_disc_header,
+                partition_header,
                 has_encryption: disc_header.has_partition_encryption(),
                 has_hashes: disc_header.has_partition_hashes(),
-            };
-
-            let mut partition_reader = PartitionWii::new(
-                reader.io.clone(),
-                reader.disc_header.clone(),
-                &info,
-                &PartitionOptions { validate_hashes: false },
-            )?;
-            info.disc_header = read_box(&mut partition_reader).context("Reading disc header")?;
-            info.partition_header =
-                read_box(&mut partition_reader).context("Reading partition header")?;
-
-            part_info.push(info);
+            });
         }
     }
     Ok(part_info)
@@ -356,18 +456,9 @@ fn read_partition_info(reader: &mut DiscReader) -> Result<Vec<PartitionInfo>> {
 fn guess_disc_size(part_info: &[PartitionInfo]) -> u64 {
     let max_offset = part_info
         .iter()
-        .flat_map(|v| {
-            let offset = v.start_sector as u64 * SECTOR_SIZE as u64;
-            [
-                offset + v.header.tmd_off() + v.header.tmd_size(),
-                offset + v.header.cert_chain_off() + v.header.cert_chain_size(),
-                offset + v.header.h3_table_off() + v.header.h3_table_size(),
-                offset + v.header.data_off() + v.header.data_size(),
-            ]
-        })
+        .map(|v| v.data_end_sector as u64 * SECTOR_SIZE as u64)
         .max()
         .unwrap_or(0x50000);
-    // TODO add FST offsets (decrypted partitions)
     if max_offset <= MINI_DVD_SIZE && !part_info.iter().any(|v| v.kind == PartitionKind::Data) {
         // Datel disc
         MINI_DVD_SIZE

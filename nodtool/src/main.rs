@@ -12,8 +12,6 @@ use argp::{FromArgValue, FromArgs};
 use enable_ansi_support::enable_ansi_support;
 use nodtool::{run, SubCommand};
 use supports_color::Stream;
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::EnvFilter;
 
 #[derive(FromArgs, Debug)]
 /// Tool for reading GameCube and Wii disc images.
@@ -99,27 +97,43 @@ fn main() {
         supports_color::on(Stream::Stdout).is_some_and(|c| c.has_basic)
     };
 
-    let format =
-        tracing_subscriber::fmt::format().with_ansi(use_colors).with_target(false).without_time();
-    let builder = tracing_subscriber::fmt().event_format(format);
-    if let Some(level) = args.log_level {
-        builder
-            .with_max_level(match level {
-                LogLevel::Error => LevelFilter::ERROR,
-                LogLevel::Warn => LevelFilter::WARN,
-                LogLevel::Info => LevelFilter::INFO,
-                LogLevel::Debug => LevelFilter::DEBUG,
-                LogLevel::Trace => LevelFilter::TRACE,
-            })
-            .init();
-    } else {
-        builder
-            .with_env_filter(
-                EnvFilter::builder()
-                    .with_default_directive(LevelFilter::INFO.into())
-                    .from_env_lossy(),
-            )
-            .init();
+    #[cfg(feature = "tracy")]
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(tracing_tracy::TracyLayer::default()),
+        )
+        .expect("setup tracy layer");
+    }
+
+    #[cfg(not(feature = "tracy"))]
+    {
+        use tracing::level_filters::LevelFilter;
+        use tracing_subscriber::EnvFilter;
+        let format = tracing_subscriber::fmt::format()
+            .with_ansi(use_colors)
+            .with_target(false)
+            .without_time();
+        let builder = tracing_subscriber::fmt().event_format(format);
+        if let Some(level) = args.log_level {
+            builder
+                .with_max_level(match level {
+                    LogLevel::Error => LevelFilter::ERROR,
+                    LogLevel::Warn => LevelFilter::WARN,
+                    LogLevel::Info => LevelFilter::INFO,
+                    LogLevel::Debug => LevelFilter::DEBUG,
+                    LogLevel::Trace => LevelFilter::TRACE,
+                })
+                .init();
+        } else {
+            builder
+                .with_env_filter(
+                    EnvFilter::builder()
+                        .with_default_directive(LevelFilter::INFO.into())
+                        .from_env_lossy(),
+                )
+                .init();
+        }
     }
 
     let mut result = Ok(());

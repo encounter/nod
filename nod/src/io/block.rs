@@ -1,106 +1,45 @@
-use std::{
-    fs, io,
-    io::{Read, Seek},
-    path::Path,
-};
+use std::{fs, io, io::Read, path::Path};
 
 use dyn_clone::DynClone;
-use zerocopy::transmute_ref;
 
 use crate::{
-    array_ref,
+    common::{Format, KeyBytes, MagicBytes, PartitionInfo},
     disc::{
-        hashes::HashTable,
-        wii::{WiiPartitionHeader, HASHES_SIZE, SECTOR_DATA_SIZE},
-        DiscHeader, PartitionHeader, PartitionKind, GCN_MAGIC, SECTOR_SIZE, WII_MAGIC,
+        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
+        DiscHeader, GCN_MAGIC, SECTOR_SIZE, WII_MAGIC,
     },
     io::{
-        aes_cbc_decrypt, aes_cbc_encrypt, split::SplitFileReader, DiscMeta, Format, KeyBytes,
-        MagicBytes,
+        split::SplitFileReader,
+        wia::{WIAException, WIAExceptionList},
     },
-    util::{lfg::LaggedFibonacci, read::read_from},
+    read::{DiscMeta, DiscStream},
+    util::{aes::decrypt_sector, array_ref, array_ref_mut, lfg::LaggedFibonacci, read::read_from},
     Error, Result, ResultContext,
 };
 
-/// Required trait bounds for reading disc images.
-pub trait DiscStream: Read + Seek + DynClone + Send + Sync {}
-
-impl<T> DiscStream for T where T: Read + Seek + DynClone + Send + Sync + ?Sized {}
-
-dyn_clone::clone_trait_object!(DiscStream);
-
-/// Block I/O trait for reading disc images.
-pub trait BlockIO: DynClone + Send + Sync {
-    /// Reads a block from the disc image.
-    fn read_block_internal(
-        &mut self,
-        out: &mut [u8],
-        block: u32,
-        partition: Option<&PartitionInfo>,
-    ) -> io::Result<Block>;
-
-    /// Reads a full block from the disc image, combining smaller blocks if necessary.
-    fn read_block(
-        &mut self,
-        out: &mut [u8],
-        block: u32,
-        partition: Option<&PartitionInfo>,
-    ) -> io::Result<Block> {
-        let block_size_internal = self.block_size_internal();
-        let block_size = self.block_size();
-        if block_size_internal == block_size {
-            self.read_block_internal(out, block, partition)
-        } else {
-            let mut offset = 0usize;
-            let mut result = None;
-            let mut block_idx =
-                ((block as u64 * block_size as u64) / block_size_internal as u64) as u32;
-            while offset < block_size as usize {
-                let block = self.read_block_internal(
-                    &mut out[offset..offset + block_size_internal as usize],
-                    block_idx,
-                    partition,
-                )?;
-                if result.is_none() {
-                    result = Some(block);
-                } else if result != Some(block) {
-                    if block == Block::Zero {
-                        out[offset..offset + block_size_internal as usize].fill(0);
-                    } else {
-                        return Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Inconsistent block types in split block",
-                        ));
-                    }
-                }
-                offset += block_size_internal as usize;
-                block_idx += 1;
-            }
-            Ok(result.unwrap_or_default())
-        }
-    }
-
-    /// The format's block size in bytes. Can be smaller than the sector size (0x8000).
-    fn block_size_internal(&self) -> u32;
+/// Block reader trait for reading disc images.
+pub trait BlockReader: DynClone + Send + Sync {
+    /// Reads a block from the disc image containing the specified sector.
+    fn read_block(&mut self, out: &mut [u8], sector: u32) -> io::Result<Block>;
 
     /// The block size used for processing. Must be a multiple of the sector size (0x8000).
-    fn block_size(&self) -> u32 { self.block_size_internal().max(SECTOR_SIZE as u32) }
+    fn block_size(&self) -> u32;
 
     /// Returns extra metadata included in the disc file format, if any.
     fn meta(&self) -> DiscMeta;
 }
 
-dyn_clone::clone_trait_object!(BlockIO);
+dyn_clone::clone_trait_object!(BlockReader);
 
-/// Creates a new [`BlockIO`] instance from a stream.
-pub fn new(mut stream: Box<dyn DiscStream>) -> Result<Box<dyn BlockIO>> {
-    let io: Box<dyn BlockIO> = match detect(stream.as_mut()).context("Detecting file type")? {
-        Some(Format::Iso) => crate::io::iso::DiscIOISO::new(stream)?,
-        Some(Format::Ciso) => crate::io::ciso::DiscIOCISO::new(stream)?,
+/// Creates a new [`BlockReader`] instance from a stream.
+pub fn new(mut stream: Box<dyn DiscStream>) -> Result<Box<dyn BlockReader>> {
+    let io: Box<dyn BlockReader> = match detect(stream.as_mut()).context("Detecting file type")? {
+        Some(Format::Iso) => crate::io::iso::BlockReaderISO::new(stream)?,
+        Some(Format::Ciso) => crate::io::ciso::BlockReaderCISO::new(stream)?,
         Some(Format::Gcz) => {
             #[cfg(feature = "compress-zlib")]
             {
-                crate::io::gcz::DiscIOGCZ::new(stream)?
+                crate::io::gcz::BlockReaderGCZ::new(stream)?
             }
             #[cfg(not(feature = "compress-zlib"))]
             return Err(Error::DiscFormat("GCZ support is disabled".to_string()));
@@ -108,17 +47,17 @@ pub fn new(mut stream: Box<dyn DiscStream>) -> Result<Box<dyn BlockIO>> {
         Some(Format::Nfs) => {
             return Err(Error::DiscFormat("NFS requires a filesystem path".to_string()))
         }
-        Some(Format::Wbfs) => crate::io::wbfs::DiscIOWBFS::new(stream)?,
-        Some(Format::Wia | Format::Rvz) => crate::io::wia::DiscIOWIA::new(stream)?,
-        Some(Format::Tgc) => crate::io::tgc::DiscIOTGC::new(stream)?,
+        Some(Format::Wbfs) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
+        Some(Format::Wia | Format::Rvz) => crate::io::wia::BlockReaderWIA::new(stream)?,
+        Some(Format::Tgc) => crate::io::tgc::BlockReaderTGC::new(stream)?,
         None => return Err(Error::DiscFormat("Unknown disc format".to_string())),
     };
     check_block_size(io.as_ref())?;
     Ok(io)
 }
 
-/// Creates a new [`BlockIO`] instance from a filesystem path.
-pub fn open(filename: &Path) -> Result<Box<dyn BlockIO>> {
+/// Creates a new [`BlockReader`] instance from a filesystem path.
+pub fn open(filename: &Path) -> Result<Box<dyn BlockReader>> {
     let path_result = fs::canonicalize(filename);
     if let Err(err) = path_result {
         return Err(Error::Io(format!("Failed to open {}", filename.display()), err));
@@ -132,28 +71,28 @@ pub fn open(filename: &Path) -> Result<Box<dyn BlockIO>> {
         return Err(Error::DiscFormat(format!("Input is not a file: {}", filename.display())));
     }
     let mut stream = Box::new(SplitFileReader::new(filename)?);
-    let io: Box<dyn BlockIO> = match detect(stream.as_mut()).context("Detecting file type")? {
-        Some(Format::Iso) => crate::io::iso::DiscIOISO::new(stream)?,
-        Some(Format::Ciso) => crate::io::ciso::DiscIOCISO::new(stream)?,
+    let io: Box<dyn BlockReader> = match detect(stream.as_mut()).context("Detecting file type")? {
+        Some(Format::Iso) => crate::io::iso::BlockReaderISO::new(stream)?,
+        Some(Format::Ciso) => crate::io::ciso::BlockReaderCISO::new(stream)?,
         Some(Format::Gcz) => {
             #[cfg(feature = "compress-zlib")]
             {
-                crate::io::gcz::DiscIOGCZ::new(stream)?
+                crate::io::gcz::BlockReaderGCZ::new(stream)?
             }
             #[cfg(not(feature = "compress-zlib"))]
             return Err(Error::DiscFormat("GCZ support is disabled".to_string()));
         }
         Some(Format::Nfs) => match path.parent() {
             Some(parent) if parent.is_dir() => {
-                crate::io::nfs::DiscIONFS::new(path.parent().unwrap())?
+                crate::io::nfs::BlockReaderNFS::new(path.parent().unwrap())?
             }
             _ => {
                 return Err(Error::DiscFormat("Failed to locate NFS parent directory".to_string()));
             }
         },
-        Some(Format::Tgc) => crate::io::tgc::DiscIOTGC::new(stream)?,
-        Some(Format::Wbfs) => crate::io::wbfs::DiscIOWBFS::new(stream)?,
-        Some(Format::Wia | Format::Rvz) => crate::io::wia::DiscIOWIA::new(stream)?,
+        Some(Format::Tgc) => crate::io::tgc::BlockReaderTGC::new(stream)?,
+        Some(Format::Wbfs) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
+        Some(Format::Wia | Format::Rvz) => crate::io::wia::BlockReaderWIA::new(stream)?,
         None => return Err(Error::DiscFormat("Unknown disc format".to_string())),
     };
     check_block_size(io.as_ref())?;
@@ -163,7 +102,7 @@ pub fn open(filename: &Path) -> Result<Box<dyn BlockIO>> {
 pub const CISO_MAGIC: MagicBytes = *b"CISO";
 pub const GCZ_MAGIC: MagicBytes = [0x01, 0xC0, 0x0B, 0xB1];
 pub const NFS_MAGIC: MagicBytes = *b"EGGS";
-pub const TGC_MAGIC: MagicBytes = [0xae, 0x0f, 0x38, 0xa2];
+pub const TGC_MAGIC: MagicBytes = [0xAE, 0x0F, 0x38, 0xA2];
 pub const WBFS_MAGIC: MagicBytes = *b"WBFS";
 pub const WIA_MAGIC: MagicBytes = *b"WIA\x01";
 pub const RVZ_MAGIC: MagicBytes = *b"RVZ\x01";
@@ -190,16 +129,7 @@ pub fn detect<R: Read + ?Sized>(stream: &mut R) -> io::Result<Option<Format>> {
     Ok(out)
 }
 
-fn check_block_size(io: &dyn BlockIO) -> Result<()> {
-    if io.block_size_internal() < SECTOR_SIZE as u32
-        && SECTOR_SIZE as u32 % io.block_size_internal() != 0
-    {
-        return Err(Error::DiscFormat(format!(
-            "Sector size {} is not divisible by block size {}",
-            SECTOR_SIZE,
-            io.block_size_internal(),
-        )));
-    }
+fn check_block_size(io: &dyn BlockReader) -> Result<()> {
     if io.block_size() % SECTOR_SIZE as u32 != 0 {
         return Err(Error::DiscFormat(format!(
             "Block size {} is not a multiple of sector size {}",
@@ -210,182 +140,263 @@ fn check_block_size(io: &dyn BlockIO) -> Result<()> {
     Ok(())
 }
 
-/// Wii partition information.
-#[derive(Debug, Clone)]
-pub struct PartitionInfo {
-    /// The partition index.
-    pub index: usize,
-    /// The kind of disc partition.
-    pub kind: PartitionKind,
-    /// The start sector of the partition.
-    pub start_sector: u32,
-    /// The start sector of the partition's data.
-    pub data_start_sector: u32,
-    /// The end sector of the partition's data.
-    pub data_end_sector: u32,
-    /// The AES key for the partition, also known as the "title key".
-    pub key: KeyBytes,
-    /// The Wii partition header.
-    pub header: Box<WiiPartitionHeader>,
-    /// The disc header within the partition.
-    pub disc_header: Box<DiscHeader>,
-    /// The partition header within the partition.
-    pub partition_header: Box<PartitionHeader>,
-    /// The hash table for the partition, if rebuilt.
-    pub hash_table: Option<HashTable>,
-    /// Whether the partition data is encrypted
-    pub has_encryption: bool,
-    /// Whether the partition data hashes are present
-    pub has_hashes: bool,
-}
-
-/// The block kind returned by [`BlockIO::read_block`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Block {
-    /// Raw data or encrypted Wii partition data
-    Raw,
-    /// Encrypted Wii partition data
-    PartEncrypted,
-    /// Decrypted Wii partition data
-    PartDecrypted {
-        /// Whether the sector has its hash block intact
-        has_hashes: bool,
-    },
-    /// Wii partition junk data
-    Junk,
-    /// All zeroes
-    #[default]
-    Zero,
+/// A block of sectors within a disc image.
+#[derive(Debug, Clone, Default)]
+pub struct Block {
+    /// The starting sector of the block.
+    pub sector: u32,
+    /// The number of sectors in the block.
+    pub count: u32,
+    /// The block kind.
+    pub kind: BlockKind,
+    /// Any hash exceptions for the block.
+    pub hash_exceptions: Box<[WIAExceptionList]>,
+    /// The duration of I/O operations, if available.
+    pub io_duration: Option<std::time::Duration>,
 }
 
 impl Block {
-    /// Decrypts the block's data (if necessary) and writes it to the output buffer.
-    pub(crate) fn decrypt(
-        self,
-        out: &mut [u8; SECTOR_SIZE],
-        data: &[u8],
-        abs_sector: u32,
-        partition: &PartitionInfo,
-    ) -> io::Result<()> {
-        let part_sector = abs_sector - partition.data_start_sector;
-        match self {
-            Block::Raw => {
-                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
-            }
-            Block::PartEncrypted => {
-                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
-                decrypt_sector(out, partition);
-            }
-            Block::PartDecrypted { has_hashes } => {
-                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
-                if !has_hashes {
-                    rebuild_hash_block(out, part_sector, partition);
-                }
-            }
-            Block::Junk => {
-                generate_junk(out, part_sector, Some(partition), &partition.disc_header);
-                rebuild_hash_block(out, part_sector, partition);
-            }
-            Block::Zero => {
-                out.fill(0);
-                rebuild_hash_block(out, part_sector, partition);
-            }
+    /// Creates a new block from a block of sectors.
+    #[inline]
+    pub fn new(block_idx: u32, block_size: u32, kind: BlockKind) -> Self {
+        let sectors_per_block = block_size / SECTOR_SIZE as u32;
+        Self {
+            sector: block_idx * sectors_per_block,
+            count: sectors_per_block,
+            kind,
+            hash_exceptions: Default::default(),
+            io_duration: None,
+        }
+    }
+
+    /// Creates a new block from a single sector.
+    #[inline]
+    pub fn sector(sector: u32, kind: BlockKind) -> Self {
+        Self { sector, count: 1, kind, hash_exceptions: Default::default(), io_duration: None }
+    }
+
+    /// Creates a new block from a range of sectors.
+    #[inline]
+    pub fn sectors(sector: u32, count: u32, kind: BlockKind) -> Self {
+        Self { sector, count, kind, hash_exceptions: Default::default(), io_duration: None }
+    }
+
+    /// Returns whether the block contains the specified sector.
+    #[inline]
+    pub fn contains(&self, sector: u32) -> bool {
+        sector >= self.sector && sector < self.sector + self.count
+    }
+
+    /// Returns an error if the block does not contain the specified sector.
+    pub fn ensure_contains(&self, sector: u32) -> io::Result<()> {
+        if !self.contains(sector) {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!(
+                    "Sector {} not in block range {}-{}",
+                    sector,
+                    self.sector,
+                    self.sector + self.count
+                ),
+            ));
         }
         Ok(())
     }
 
-    /// Encrypts the block's data (if necessary) and writes it to the output buffer.
-    pub(crate) fn encrypt(
-        self,
-        out: &mut [u8; SECTOR_SIZE],
-        data: &[u8],
-        abs_sector: u32,
-        partition: &PartitionInfo,
-    ) -> io::Result<()> {
-        let part_sector = abs_sector - partition.data_start_sector;
-        match self {
-            Block::Raw => {
-                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
-                encrypt_sector(out, partition);
-            }
-            Block::PartEncrypted => {
-                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
-            }
-            Block::PartDecrypted { has_hashes } => {
-                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
-                if !has_hashes {
-                    rebuild_hash_block(out, part_sector, partition);
+    /// Decrypts block data in-place. The decrypted data can be accessed using
+    /// [`partition_data`](Block::partition_data).
+    pub(crate) fn decrypt_block(&self, data: &mut [u8], key: Option<KeyBytes>) -> io::Result<()> {
+        match self.kind {
+            BlockKind::None => {}
+            BlockKind::Raw => {
+                if let Some(key) = key {
+                    for i in 0..self.count as usize {
+                        decrypt_sector(array_ref_mut![data, i * SECTOR_SIZE, SECTOR_SIZE], &key);
+                    }
                 }
-                encrypt_sector(out, partition);
             }
-            Block::Junk => {
-                generate_junk(out, part_sector, Some(partition), &partition.disc_header);
-                rebuild_hash_block(out, part_sector, partition);
-                encrypt_sector(out, partition);
+            BlockKind::PartDecrypted { .. } => {
+                // no-op
             }
-            Block::Zero => {
-                out.fill(0);
-                rebuild_hash_block(out, part_sector, partition);
-                encrypt_sector(out, partition);
+            BlockKind::Junk => {
+                // unsupported, used for DirectDiscReader
+                data.fill(0);
             }
+            BlockKind::Zero => data.fill(0),
         }
         Ok(())
     }
 
-    /// Copies the block's raw data to the output buffer.
-    pub(crate) fn copy_raw(
-        self,
+    /// Copies a sector's raw data to the output buffer. Returns whether the sector is encrypted
+    /// and whether it has hashes.
+    pub(crate) fn copy_sector(
+        &self,
         out: &mut [u8; SECTOR_SIZE],
         data: &[u8],
         abs_sector: u32,
         disc_header: &DiscHeader,
-    ) -> io::Result<()> {
-        match self {
-            Block::Raw | Block::PartEncrypted | Block::PartDecrypted { .. } => {
-                out.copy_from_slice(block_sector::<SECTOR_SIZE>(data, abs_sector)?);
+        partition: Option<&PartitionInfo>,
+    ) -> io::Result<(bool, bool)> {
+        let mut encrypted = false;
+        let mut has_hashes = false;
+        match self.kind {
+            BlockKind::None => {}
+            BlockKind::Raw => {
+                *out = *self.sector_buf(data, abs_sector)?;
+                if partition.is_some_and(|p| p.has_encryption) {
+                    encrypted = true;
+                }
+                if partition.is_some_and(|p| p.has_hashes) {
+                    has_hashes = true;
+                }
             }
-            Block::Junk => generate_junk(out, abs_sector, None, disc_header),
-            Block::Zero => out.fill(0),
+            BlockKind::PartDecrypted { hash_block } => {
+                if hash_block {
+                    *out = *self.sector_buf(data, abs_sector)?;
+                    has_hashes = partition.is_some_and(|p| p.has_hashes);
+                } else {
+                    *array_ref_mut![out, HASHES_SIZE, SECTOR_DATA_SIZE] =
+                        *self.sector_data_buf(data, abs_sector)?;
+                }
+            }
+            BlockKind::Junk => generate_junk_sector(out, abs_sector, partition, disc_header),
+            BlockKind::Zero => out.fill(0),
         }
+        Ok((encrypted, has_hashes))
+    }
+
+    /// Returns a sector's data from the block buffer.
+    pub(crate) fn sector_buf<'a>(
+        &self,
+        data: &'a [u8],
+        abs_sector: u32,
+    ) -> io::Result<&'a [u8; SECTOR_SIZE]> {
+        self.ensure_contains(abs_sector)?;
+        let block_offset = ((abs_sector - self.sector) * SECTOR_SIZE as u32) as usize;
+        Ok(array_ref!(data, block_offset, SECTOR_SIZE))
+    }
+
+    /// Returns a sector's partition data (excluding hashes) from the block buffer.
+    pub(crate) fn sector_data_buf<'a>(
+        &self,
+        data: &'a [u8],
+        abs_sector: u32,
+    ) -> io::Result<&'a [u8; SECTOR_DATA_SIZE]> {
+        self.ensure_contains(abs_sector)?;
+        let block_offset = ((abs_sector - self.sector) * SECTOR_DATA_SIZE as u32) as usize;
+        Ok(array_ref!(data, block_offset, SECTOR_DATA_SIZE))
+    }
+
+    /// Returns raw data from the block buffer, starting at the specified position.
+    pub(crate) fn data<'a>(&self, data: &'a [u8], pos: u64) -> io::Result<&'a [u8]> {
+        if self.kind == BlockKind::None {
+            return Ok(&[]);
+        }
+        self.ensure_contains((pos / SECTOR_SIZE as u64) as u32)?;
+        let offset = (pos - self.sector as u64 * SECTOR_SIZE as u64) as usize;
+        let end = self.count as usize * SECTOR_SIZE;
+        Ok(&data[offset..end])
+    }
+
+    /// Returns partition data (excluding hashes) from the block buffer, starting at the specified
+    /// position within the partition.
+    ///
+    /// If the block does not contain hashes, this will return the full block data. Otherwise, this
+    /// will return only the corresponding sector's data, ending at the sector boundary, to avoid
+    /// reading into the next sector's hash block.
+    pub(crate) fn partition_data<'a>(
+        &self,
+        data: &'a [u8],
+        pos: u64,
+        data_start_sector: u32,
+        partition_has_hashes: bool,
+    ) -> io::Result<&'a [u8]> {
+        let block_has_hashes = match self.kind {
+            BlockKind::Raw => partition_has_hashes,
+            BlockKind::PartDecrypted { hash_block, .. } => hash_block && partition_has_hashes,
+            BlockKind::Junk | BlockKind::Zero => false,
+            BlockKind::None => return Ok(&[]),
+        };
+        let (part_sector, sector_offset) = if partition_has_hashes {
+            ((pos / SECTOR_DATA_SIZE as u64) as u32, (pos % SECTOR_DATA_SIZE as u64) as usize)
+        } else {
+            ((pos / SECTOR_SIZE as u64) as u32, (pos % SECTOR_SIZE as u64) as usize)
+        };
+        let abs_sector = part_sector + data_start_sector;
+        self.ensure_contains(abs_sector)?;
+        let block_sector = (abs_sector - self.sector) as usize;
+        if block_has_hashes {
+            let offset = block_sector * SECTOR_SIZE + HASHES_SIZE + sector_offset;
+            let end = (block_sector + 1) * SECTOR_SIZE; // end of sector
+            Ok(&data[offset..end])
+        } else if partition_has_hashes {
+            let offset = block_sector * SECTOR_DATA_SIZE + sector_offset;
+            let end = self.count as usize * SECTOR_DATA_SIZE; // end of block
+            Ok(&data[offset..end])
+        } else {
+            let offset = block_sector * SECTOR_SIZE + sector_offset;
+            let end = self.count as usize * SECTOR_SIZE; // end of block
+            Ok(&data[offset..end])
+        }
+    }
+
+    pub(crate) fn append_hash_exceptions(
+        &self,
+        abs_sector: u32,
+        group_sector: u32,
+        out: &mut Vec<WIAException>,
+    ) -> io::Result<()> {
+        self.ensure_contains(abs_sector)?;
+        let block_sector = abs_sector - self.sector;
+        let group = (block_sector / 64) as usize;
+        let base_offset = ((block_sector % 64) as usize * HASHES_SIZE) as u16;
+        let new_base_offset = (group_sector * HASHES_SIZE as u32) as u16;
+        out.extend(self.hash_exceptions.get(group).iter().flat_map(|list| {
+            list.iter().filter_map(|exception| {
+                let offset = exception.offset.get();
+                if offset >= base_offset && offset < base_offset + HASHES_SIZE as u16 {
+                    let new_offset = (offset - base_offset) + new_base_offset;
+                    Some(WIAException { offset: new_offset.into(), hash: exception.hash })
+                } else {
+                    None
+                }
+            })
+        }));
         Ok(())
     }
 }
 
-#[inline(always)]
-fn block_sector<const N: usize>(data: &[u8], sector_idx: u32) -> io::Result<&[u8; N]> {
-    if data.len() % N != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("Expected block size {} to be a multiple of {}", data.len(), N),
-        ));
-    }
-    let rel_sector = sector_idx % (data.len() / N) as u32;
-    let offset = rel_sector as usize * N;
-    data.get(offset..offset + N)
-        .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Sector {} out of range (block size {}, sector size {})",
-                    rel_sector,
-                    data.len(),
-                    N
-                ),
-            )
-        })
-        .map(|v| unsafe { &*(v as *const [u8] as *const [u8; N]) })
+/// The block kind.
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
+pub enum BlockKind {
+    /// Empty block, likely end of disc
+    #[default]
+    None,
+    /// Raw data or encrypted Wii partition data
+    Raw,
+    /// Decrypted Wii partition data
+    PartDecrypted {
+        /// Whether the sector has its hash block intact
+        hash_block: bool,
+    },
+    /// Wii partition junk data
+    Junk,
+    /// All zeroes
+    Zero,
 }
 
-fn generate_junk(
+/// Generates junk data for a single sector.
+pub fn generate_junk_sector(
     out: &mut [u8; SECTOR_SIZE],
-    sector: u32,
+    abs_sector: u32,
     partition: Option<&PartitionInfo>,
     disc_header: &DiscHeader,
 ) {
-    let (pos, offset) = if partition.is_some() {
+    let (pos, offset) = if partition.is_some_and(|p| p.has_hashes) {
+        let sector = abs_sector - partition.unwrap().data_start_sector;
         (sector as u64 * SECTOR_DATA_SIZE as u64, HASHES_SIZE)
     } else {
-        (sector as u64 * SECTOR_SIZE as u64, 0)
+        (abs_sector as u64 * SECTOR_SIZE as u64, 0)
     };
     out[..offset].fill(0);
     let mut lfg = LaggedFibonacci::default();
@@ -395,34 +406,4 @@ fn generate_junk(
         disc_header.disc_num,
         pos,
     );
-}
-
-fn rebuild_hash_block(out: &mut [u8; SECTOR_SIZE], part_sector: u32, partition: &PartitionInfo) {
-    let Some(hash_table) = partition.hash_table.as_ref() else {
-        return;
-    };
-    let sector_idx = part_sector as usize;
-    let h0_hashes: &[u8; 0x26C] =
-        transmute_ref!(array_ref![hash_table.h0_hashes, sector_idx * 31, 31]);
-    out[0..0x26C].copy_from_slice(h0_hashes);
-    let h1_hashes: &[u8; 0xA0] =
-        transmute_ref!(array_ref![hash_table.h1_hashes, sector_idx & !7, 8]);
-    out[0x280..0x320].copy_from_slice(h1_hashes);
-    let h2_hashes: &[u8; 0xA0] =
-        transmute_ref!(array_ref![hash_table.h2_hashes, (sector_idx / 8) & !7, 8]);
-    out[0x340..0x3E0].copy_from_slice(h2_hashes);
-}
-
-fn encrypt_sector(out: &mut [u8; SECTOR_SIZE], partition: &PartitionInfo) {
-    aes_cbc_encrypt(&partition.key, &[0u8; 16], &mut out[..HASHES_SIZE]);
-    // Data IV from encrypted hash block
-    let iv = *array_ref![out, 0x3D0, 16];
-    aes_cbc_encrypt(&partition.key, &iv, &mut out[HASHES_SIZE..]);
-}
-
-fn decrypt_sector(out: &mut [u8; SECTOR_SIZE], partition: &PartitionInfo) {
-    // Data IV from encrypted hash block
-    let iv = *array_ref![out, 0x3D0, 16];
-    aes_cbc_decrypt(&partition.key, &[0u8; 16], &mut out[..HASHES_SIZE]);
-    aes_cbc_decrypt(&partition.key, &iv, &mut out[HASHES_SIZE..]);
 }
