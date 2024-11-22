@@ -47,7 +47,7 @@ pub const REGION_OFFSET: u64 = 0x4E000;
 // ppki (Retail)
 pub(crate) const RVL_CERT_ISSUER_PPKI_TICKET: &str = "Root-CA00000001-XS00000003";
 #[rustfmt::skip]
-pub(crate) const RETAIL_COMMON_KEYS: [KeyBytes; 3] = [
+pub(crate) static RETAIL_COMMON_KEYS: [KeyBytes; 3] = [
     /* RVL_KEY_RETAIL */
     [0xeb, 0xe4, 0x2a, 0x22, 0x5e, 0x85, 0x93, 0xe4, 0x48, 0xd9, 0xc5, 0x45, 0x73, 0x81, 0xaa, 0xf7],
     /* RVL_KEY_KOREAN */
@@ -59,7 +59,7 @@ pub(crate) const RETAIL_COMMON_KEYS: [KeyBytes; 3] = [
 // dpki (Debug)
 pub(crate) const RVL_CERT_ISSUER_DPKI_TICKET: &str = "Root-CA00000002-XS00000006";
 #[rustfmt::skip]
-pub(crate) const DEBUG_COMMON_KEYS: [KeyBytes; 3] = [
+pub(crate) static DEBUG_COMMON_KEYS: [KeyBytes; 3] = [
     /* RVL_KEY_DEBUG */
     [0xa1, 0x60, 0x4a, 0x6a, 0x71, 0x23, 0xb5, 0x29, 0xae, 0x8b, 0xec, 0x32, 0xc8, 0x16, 0xfc, 0xaa],
     /* RVL_KEY_KOREAN_DEBUG */

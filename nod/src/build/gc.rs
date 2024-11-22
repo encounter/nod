@@ -653,7 +653,7 @@ impl<W> WriteCursor<W>
 where W: Write
 {
     fn write_zeroes_until(&mut self, until: u64) -> io::Result<()> {
-        const ZEROES: [u8; 0x1000] = [0u8; 0x1000];
+        static ZEROES: [u8; 0x1000] = [0u8; 0x1000];
         let mut remaining = until.saturating_sub(self.position);
         while remaining > 0 {
             let write_len = remaining.min(ZEROES.len() as u64) as usize;

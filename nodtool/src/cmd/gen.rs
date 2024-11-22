@@ -721,7 +721,7 @@ where W: Write
     fn flush(&mut self) -> io::Result<()> { self.inner.flush() }
 }
 
-const ZERO_SECTOR: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
+static ZERO_SECTOR: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
 
 impl<W> Seek for HashStream<W>
 where W: Write

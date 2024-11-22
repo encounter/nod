@@ -222,7 +222,10 @@ impl dyn PartitionReader + '_ {
     /// ```no_run
     /// use std::io::Read;
     ///
-    /// use nod::read::{DiscOptions, DiscReader, PartitionKind, PartitionOptions};
+    /// use nod::{
+    ///     common::PartitionKind,
+    ///     read::{DiscOptions, DiscReader, PartitionOptions},
+    /// };
     ///
     /// fn main() -> nod::Result<()> {
     ///     let disc = DiscReader::new("path/to/file.iso", &DiscOptions::default())?;
@@ -262,7 +265,10 @@ impl dyn PartitionReader {
     /// ```no_run
     /// use std::io::Read;
     ///
-    /// use nod::read::{DiscOptions, DiscReader, OwnedFileReader, PartitionKind, PartitionOptions};
+    /// use nod::{
+    ///     common::PartitionKind,
+    ///     read::{DiscOptions, DiscReader, OwnedFileReader, PartitionOptions},
+    /// };
     ///
     /// fn main() -> nod::Result<()> {
     ///     let disc = DiscReader::new("path/to/file.iso", &DiscOptions::default())?;
