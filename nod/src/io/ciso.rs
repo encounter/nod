@@ -65,7 +65,7 @@ impl BlockReaderCISO {
         }
 
         // Build block map
-        let mut block_map = [0u16; CISO_MAP_SIZE];
+        let mut block_map = <[u16; CISO_MAP_SIZE]>::new_box_zeroed()?;
         let mut block = 0u16;
         for (presence, out) in header.block_present.iter().zip(block_map.iter_mut()) {
             if *presence == 1 {
@@ -92,7 +92,7 @@ impl BlockReaderCISO {
             None
         };
 
-        Ok(Box::new(Self { inner, header, block_map: Arc::new(block_map), nkit_header }))
+        Ok(Box::new(Self { inner, header, block_map: Arc::from(block_map), nkit_header }))
     }
 }
 

@@ -67,7 +67,7 @@ pub struct DiscHeader {
     pub audio_stream_buf_size: u8,
     /// Padding
     _pad1: [u8; 14],
-    /// If this is a Wii disc, this will bPartitionKinde 0x5D1C9EA3
+    /// If this is a Wii disc, this will be 0x5D1C9EA3
     pub wii_magic: MagicBytes,
     /// If this is a GameCube disc, this will be 0xC2339F3D
     pub gcn_magic: MagicBytes,
@@ -126,7 +126,7 @@ pub struct PartitionHeader {
     pub debug_mon_offset: U32,
     /// Debug monitor load address
     pub debug_load_address: U32,
-    /// PaddingPartitionKind
+    /// Padding
     _pad1: [u8; 0x18],
     /// Offset to main DOL (Wii: >> 2)
     pub dol_offset: U32,
