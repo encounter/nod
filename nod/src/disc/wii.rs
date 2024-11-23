@@ -15,7 +15,7 @@ use crate::{
     disc::{
         gcn::{read_part_meta, PartitionReaderGC},
         hashes::sha1_hash,
-        preloader::{Preloader, SectorGroup, SectorGroupRequest},
+        preloader::{fetch_sector_group, Preloader, SectorGroup, SectorGroupRequest},
         SECTOR_GROUP_SIZE, SECTOR_SIZE,
     },
     io::block::BlockReader,
@@ -378,24 +378,19 @@ impl BufRead for PartitionReaderWii {
                 PartitionEncryption::ForceDecryptedNoHashes
             },
         };
-        let sector_group = if matches!(&self.sector_group, Some(sector_group) if sector_group.request == request)
-        {
-            // We can improve this in Rust 2024 with `if_let_rescope`
-            // https://github.com/rust-lang/rust/issues/124085
-            self.sector_group.as_ref().unwrap()
-        } else {
-            let sector_group = self.preloader.fetch(request, max_groups)?;
-            if self.options.validate_hashes {
-                if let Some(h3_table) = self.meta.as_ref().and_then(|m| m.raw_h3_table.as_deref()) {
-                    verify_hashes(
-                        array_ref![sector_group.data, 0, SECTOR_GROUP_SIZE],
-                        group_idx,
-                        h3_table,
-                    )?;
-                }
+
+        // Load sector group
+        let (sector_group, updated) =
+            fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
+        if updated && self.options.validate_hashes {
+            if let Some(h3_table) = self.meta.as_ref().and_then(|m| m.raw_h3_table.as_deref()) {
+                verify_hashes(
+                    array_ref![sector_group.data, 0, SECTOR_GROUP_SIZE],
+                    group_idx,
+                    h3_table,
+                )?;
             }
-            self.sector_group.insert(sector_group)
-        };
+        }
 
         // Read from sector group buffer
         let consecutive_sectors = sector_group.consecutive_sectors(group_sector);

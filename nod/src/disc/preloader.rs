@@ -11,6 +11,7 @@ use bytes::{Bytes, BytesMut};
 use crossbeam_channel::{Receiver, Sender};
 use crossbeam_utils::sync::WaitGroup;
 use lru::LruCache;
+use polonius_the_crab::{polonius, polonius_return};
 use simple_moving_average::{SingleSumSMA, SMA};
 use tracing::{debug, error, instrument, span, Level};
 use zerocopy::FromZeros;
@@ -555,4 +556,23 @@ impl SectorGroupLoader {
 
         Ok((sector_bitmap, io_duration))
     }
+}
+
+/// Fetch a sector group from the cache or from the preloader.
+/// Returns a boolean indicating if the group was updated.
+pub fn fetch_sector_group<'a>(
+    request: SectorGroupRequest,
+    max_groups: u32,
+    mut cached: &'a mut Option<SectorGroup>,
+    preloader: &Preloader,
+) -> io::Result<(&'a SectorGroup, bool)> {
+    polonius!(|cached| -> io::Result<(&'polonius SectorGroup, bool)> {
+        if let Some(sector_group) = cached {
+            if sector_group.request == request {
+                polonius_return!(Ok((sector_group, false)));
+            }
+        }
+    });
+    let sector_group = preloader.fetch(request, max_groups)?;
+    Ok((cached.insert(sector_group), true))
 }

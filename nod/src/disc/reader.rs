@@ -14,7 +14,9 @@ use crate::{
         direct::{DirectDiscReader, DirectDiscReaderMode},
         fst::{Fst, NodeKind},
         gcn::{read_fst, PartitionReaderGC},
-        preloader::{Preloader, SectorGroup, SectorGroupLoader, SectorGroupRequest},
+        preloader::{
+            fetch_sector_group, Preloader, SectorGroup, SectorGroupLoader, SectorGroupRequest,
+        },
         wii::{
             PartitionReaderWii, WiiPartEntry, WiiPartGroup, WiiPartitionHeader, REGION_OFFSET,
             REGION_SIZE, WII_PART_GROUP_OFF,
@@ -32,6 +34,7 @@ use crate::{
 
 pub struct DiscReader {
     io: Box<dyn BlockReader>,
+    preloader: Arc<Preloader>,
     pos: u64,
     size: u64,
     mode: PartitionEncryption,
@@ -39,7 +42,6 @@ pub struct DiscReader {
     partitions: Arc<[PartitionInfo]>,
     region: Option<[u8; REGION_SIZE]>,
     sector_group: Option<SectorGroup>,
-    preloader: Arc<Preloader>,
     alt_disc_header: Option<Arc<DiscHeader>>,
     alt_partitions: Option<Arc<[PartitionInfo]>>,
 }
@@ -48,6 +50,7 @@ impl Clone for DiscReader {
     fn clone(&self) -> Self {
         Self {
             io: self.io.clone(),
+            preloader: self.preloader.clone(),
             pos: 0,
             size: self.size,
             mode: self.mode,
@@ -55,7 +58,6 @@ impl Clone for DiscReader {
             partitions: self.partitions.clone(),
             region: self.region,
             sector_group: None,
-            preloader: self.preloader.clone(),
             alt_disc_header: self.alt_disc_header.clone(),
             alt_partitions: self.alt_partitions.clone(),
         }
@@ -124,6 +126,7 @@ impl DiscReader {
         );
         Ok(Self {
             io,
+            preloader,
             pos: 0,
             size,
             mode: options.partition_encryption,
@@ -131,7 +134,6 @@ impl DiscReader {
             partitions,
             region,
             sector_group: None,
-            preloader,
             alt_disc_header,
             alt_partitions,
         })
@@ -246,14 +248,8 @@ impl DiscReader {
         };
 
         // Load sector group
-        let sector_group = if matches!(&self.sector_group, Some(sector_group) if sector_group.request == request)
-        {
-            // We can improve this in Rust 2024 with `if_let_rescope`
-            // https://github.com/rust-lang/rust/issues/124085
-            self.sector_group.as_ref().unwrap()
-        } else {
-            self.sector_group.insert(self.preloader.fetch(request, max_groups)?)
-        };
+        let (sector_group, _updated) =
+            fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
 
         // Calculate the number of consecutive sectors in the group
         let group_sector = abs_sector - abs_group_sector;
@@ -307,14 +303,8 @@ impl BufRead for DiscReader {
         };
 
         // Load sector group
-        let sector_group = if matches!(&self.sector_group, Some(sector_group) if sector_group.request == request)
-        {
-            // We can improve this in Rust 2024 with `if_let_rescope`
-            // https://github.com/rust-lang/rust/issues/124085
-            self.sector_group.as_ref().unwrap()
-        } else {
-            self.sector_group.insert(self.preloader.fetch(request, max_groups)?)
-        };
+        let (sector_group, _updated) =
+            fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
 
         // Calculate the number of consecutive sectors in the group
         let group_sector = abs_sector - abs_group_sector;

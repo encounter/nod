@@ -9,7 +9,7 @@ use zerocopy::FromBytes;
 
 use crate::{
     disc::{
-        preloader::{Preloader, SectorGroup, SectorGroupRequest},
+        preloader::{fetch_sector_group, Preloader, SectorGroup, SectorGroupRequest},
         ApploaderHeader, DiscHeader, DolHeader, PartitionHeader, BI2_SIZE, BOOT_SIZE,
         SECTOR_GROUP_SIZE, SECTOR_SIZE,
     },
@@ -77,14 +77,9 @@ impl BufRead for PartitionReaderGC {
             mode: PartitionEncryption::Original,
         };
 
-        let sector_group = if matches!(&self.sector_group, Some(sector_group) if sector_group.request == request)
-        {
-            // We can improve this in Rust 2024 with `if_let_rescope`
-            // https://github.com/rust-lang/rust/issues/124085
-            self.sector_group.as_ref().unwrap()
-        } else {
-            self.sector_group.insert(self.preloader.fetch(request, max_groups)?)
-        };
+        // Load sector group
+        let (sector_group, _updated) =
+            fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
 
         // Calculate the number of consecutive sectors in the group
         let group_sector = abs_sector - abs_group_sector;
@@ -146,18 +141,9 @@ pub(crate) fn read_dol(
     let mut raw_dol: Vec<u8> =
         read_vec(reader, size_of::<DolHeader>()).context("Reading DOL header")?;
     let dol_header = DolHeader::ref_from_bytes(raw_dol.as_slice()).unwrap();
-    let dol_size = dol_header
-        .text_offs
-        .iter()
-        .zip(&dol_header.text_sizes)
+    let dol_size = (dol_header.text_offs.iter().zip(&dol_header.text_sizes))
+        .chain(dol_header.data_offs.iter().zip(&dol_header.data_sizes))
         .map(|(offs, size)| offs.get() + size.get())
-        .chain(
-            dol_header
-                .data_offs
-                .iter()
-                .zip(&dol_header.data_sizes)
-                .map(|(offs, size)| offs.get() + size.get()),
-        )
         .max()
         .unwrap_or(size_of::<DolHeader>() as u32);
     raw_dol.resize(dol_size as usize, 0);
@@ -203,12 +189,10 @@ pub(crate) fn read_part_meta(
     let mut raw_apploader: Vec<u8> =
         read_vec(reader, size_of::<ApploaderHeader>()).context("Reading apploader header")?;
     let apploader_header = ApploaderHeader::ref_from_bytes(raw_apploader.as_slice()).unwrap();
-    raw_apploader.resize(
-        size_of::<ApploaderHeader>()
-            + apploader_header.size.get() as usize
-            + apploader_header.trailer_size.get() as usize,
-        0,
-    );
+    let apploader_size = size_of::<ApploaderHeader>()
+        + apploader_header.size.get() as usize
+        + apploader_header.trailer_size.get() as usize;
+    raw_apploader.resize(apploader_size, 0);
     reader
         .read_exact(&mut raw_apploader[size_of::<ApploaderHeader>()..])
         .context("Reading apploader")?;
