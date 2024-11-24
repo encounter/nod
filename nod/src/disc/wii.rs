@@ -14,7 +14,6 @@ use crate::{
     common::{HashBytes, KeyBytes, PartitionInfo},
     disc::{
         gcn::{read_part_meta, PartitionReaderGC},
-        hashes::sha1_hash,
         preloader::{fetch_sector_group, Preloader, SectorGroup, SectorGroupRequest},
         SECTOR_GROUP_SIZE, SECTOR_SIZE,
     },
@@ -22,7 +21,9 @@ use crate::{
     read::{PartitionEncryption, PartitionMeta, PartitionOptions, PartitionReader},
     util::{
         aes::aes_cbc_decrypt,
-        array_ref, div_rem, impl_read_for_bufread,
+        array_ref,
+        digest::sha1_hash,
+        div_rem, impl_read_for_bufread,
         read::{read_arc, read_arc_slice},
         static_assert,
     },

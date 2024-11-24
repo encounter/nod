@@ -14,7 +14,6 @@ use zerocopy::{big_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownL
 use crate::{
     common::{Compression, Format, HashBytes, KeyBytes, MagicBytes},
     disc::{
-        hashes::sha1_hash,
         reader::DiscReader,
         wii::SECTOR_DATA_SIZE,
         writer::{par_process, read_block, BlockProcessor, BlockResult, DataCallback, DiscWriter},
@@ -29,7 +28,7 @@ use crate::{
         aes::decrypt_sector_data_b2b,
         align_up_32, align_up_64, array_ref, array_ref_mut,
         compress::{Compressor, DecompressionKind, Decompressor},
-        digest::DigestManager,
+        digest::{sha1_hash, DigestManager},
         lfg::LaggedFibonacci,
         read::{read_arc_slice, read_from, read_vec},
         static_assert,

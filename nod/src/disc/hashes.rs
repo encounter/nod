@@ -7,7 +7,7 @@ use crate::{
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         SECTOR_GROUP_SIZE, SECTOR_SIZE,
     },
-    util::{array_ref, array_ref_mut},
+    util::{array_ref, array_ref_mut, digest::sha1_hash},
 };
 
 /// Hashes for a single sector group (64 sectors).
@@ -72,21 +72,4 @@ pub fn hash_sector_group(sector_group: &[u8; SECTOR_GROUP_SIZE]) -> Box<GroupHas
     }
     result.h3_hash = sha1_hash(result.h2_hashes.as_bytes());
     result
-}
-
-/// Hashes a byte slice with SHA-1.
-#[instrument(skip_all)]
-pub fn sha1_hash(buf: &[u8]) -> HashBytes {
-    #[cfg(feature = "openssl")]
-    {
-        // The one-shot openssl::sha::sha1 ends up being much slower
-        let mut hasher = openssl::sha::Sha1::new();
-        hasher.update(buf);
-        hasher.finish()
-    }
-    #[cfg(not(feature = "openssl"))]
-    {
-        use sha1::Digest;
-        HashBytes::from(sha1::Sha1::digest(buf))
-    }
 }

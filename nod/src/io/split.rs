@@ -103,7 +103,6 @@ impl SplitFileReader {
 
     pub fn len(&self) -> u64 { self.files.last().map_or(0, |f| f.begin + f.size) }
 
-    #[instrument(name = "SplitFileReader::check_open_file", skip_all)]
     fn check_open_file(&mut self) -> io::Result<Option<&mut Split<BufReader<File>>>> {
         if self.open_file.is_none() || !self.open_file.as_ref().unwrap().contains(self.pos) {
             self.open_file = if let Some(split) = self.files.iter().find(|f| f.contains(self.pos)) {

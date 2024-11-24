@@ -6,9 +6,27 @@ use digest::Digest;
 use tracing::instrument;
 
 use crate::{
+    common::HashBytes,
     io::nkit::NKitHeader,
     write::{DiscFinalization, ProcessOptions},
 };
+
+/// Hashes a byte slice with SHA-1.
+#[instrument(skip_all)]
+pub fn sha1_hash(buf: &[u8]) -> HashBytes {
+    #[cfg(feature = "openssl")]
+    {
+        // The one-shot openssl::sha::sha1 ends up being much slower
+        let mut hasher = openssl::sha::Sha1::new();
+        hasher.update(buf);
+        hasher.finish()
+    }
+    #[cfg(not(feature = "openssl"))]
+    {
+        use sha1::Digest;
+        HashBytes::from(sha1::Sha1::digest(buf))
+    }
+}
 
 pub type DigestThread = (Sender<Bytes>, JoinHandle<DigestResult>);
 
@@ -40,13 +58,13 @@ impl DigestManager {
         }
         if options.digest_md5 {
             #[cfg(feature = "openssl")]
-            threads.push(digest_thread::<ossl::HasherMD5>());
+            threads.push(digest_thread::<openssl_util::HasherMD5>());
             #[cfg(not(feature = "openssl"))]
             threads.push(digest_thread::<md5::Md5>());
         }
         if options.digest_sha1 {
             #[cfg(feature = "openssl")]
-            threads.push(digest_thread::<ossl::HasherSHA1>());
+            threads.push(digest_thread::<openssl_util::HasherSHA1>());
             #[cfg(not(feature = "openssl"))]
             threads.push(digest_thread::<sha1::Sha1>());
         }
@@ -156,7 +174,7 @@ impl Hasher for xxhash_rust::xxh64::Xxh64 {
 }
 
 #[cfg(feature = "openssl")]
-mod ossl {
+mod openssl_util {
     use tracing::instrument;
 
     use super::{DigestResult, Hasher};
@@ -208,7 +226,7 @@ mod ossl {
         }
 
         #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
-        #[instrument(name = "ossl::HasherMD5::update", skip_all)]
+        #[instrument(name = "openssl_util::HasherMD5::update", skip_all)]
         fn update(&mut self, data: &[u8]) { self.hasher.update(data).unwrap() }
     }
 
@@ -222,7 +240,7 @@ mod ossl {
         }
 
         #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
-        #[instrument(name = "ossl::HasherSHA1::update", skip_all)]
+        #[instrument(name = "openssl_util::HasherSHA1::update", skip_all)]
         fn update(&mut self, data: &[u8]) { self.hasher.update(data).unwrap() }
     }
 }
