@@ -1,7 +1,6 @@
 //! Lagged Fibonacci generator for GC / Wii partition junk data.
 
 use std::{
-    cmp::min,
     io,
     io::{Read, Write},
 };
@@ -10,16 +9,22 @@ use bytes::Buf;
 use tracing::instrument;
 use zerocopy::{transmute_ref, IntoBytes};
 
-use crate::disc::SECTOR_SIZE;
+use crate::{disc::SECTOR_SIZE, util::array_ref_mut};
 
 /// Value of `k` for the LFG.
 pub const LFG_K: usize = 521;
+
+/// Value of `k` for the LFG in bytes.
+pub const LFG_K_BYTES: usize = LFG_K * 4;
 
 /// Value of `j` for the LFG.
 pub const LFG_J: usize = 32;
 
 /// Number of 32-bit words in the seed.
 pub const SEED_SIZE: usize = 17;
+
+/// Size of the seed in bytes.
+pub const SEED_SIZE_BYTES: usize = SEED_SIZE * 4;
 
 /// Lagged Fibonacci generator for GC / Wii partition junk data.
 ///
@@ -39,16 +44,49 @@ impl Default for LaggedFibonacci {
 impl LaggedFibonacci {
     fn init(&mut self) {
         for i in SEED_SIZE..LFG_K {
-            self.buffer[i] =
-                (self.buffer[i - 17] << 23) ^ (self.buffer[i - 16] >> 9) ^ self.buffer[i - 1];
+            self.buffer[i] = (self.buffer[i - SEED_SIZE] << 23)
+                ^ (self.buffer[i - SEED_SIZE + 1] >> 9)
+                ^ self.buffer[i - 1];
         }
         // Instead of doing the "shift by 18 instead of 16" oddity when actually outputting the data,
         // we can do the shifting (and byteswapping) at this point to make the output code simpler.
         for x in self.buffer.iter_mut() {
-            *x = ((*x & 0xFF00FFFF) | (*x >> 2 & 0x00FF0000)).swap_bytes();
+            *x = ((*x & 0xFF00FFFF) | (*x >> 2 & 0x00FF0000)).to_be();
         }
         for _ in 0..4 {
             self.forward();
+        }
+    }
+
+    /// Generates the seed for GC / Wii partition junk data using the disc ID, disc number, and sector.
+    pub fn generate_seed(out: &mut [u32; SEED_SIZE], disc_id: [u8; 4], disc_num: u8, sector: u32) {
+        let seed = u32::from_be_bytes([
+            disc_id[2],
+            disc_id[1],
+            disc_id[3].wrapping_add(disc_id[2]),
+            disc_id[0].wrapping_add(disc_id[1]),
+        ]) ^ disc_num as u32;
+        let mut n = seed.wrapping_mul(0x260BCD5) ^ sector.wrapping_mul(0x1EF29123);
+        for v in &mut *out {
+            *v = 0u32;
+            for _ in 0..LFG_J {
+                n = n.wrapping_mul(0x5D588B65).wrapping_add(1);
+                *v = (*v >> 1) | (n & 0x80000000);
+            }
+        }
+        out[16] ^= out[0] >> 9 ^ out[16] << 23;
+    }
+
+    /// Same as [`generate_seed`], but ensures the resulting seed is big-endian.
+    pub fn generate_seed_be(
+        out: &mut [u32; SEED_SIZE],
+        disc_id: [u8; 4],
+        disc_num: u8,
+        sector: u32,
+    ) {
+        Self::generate_seed(out, disc_id, disc_num, sector);
+        for x in out.iter_mut() {
+            *x = x.to_be();
         }
     }
 
@@ -57,27 +95,12 @@ impl LaggedFibonacci {
     /// sector.
     #[instrument(name = "LaggedFibonacci::init_with_seed", skip_all)]
     pub fn init_with_seed(&mut self, disc_id: [u8; 4], disc_num: u8, partition_offset: u64) {
-        let seed = u32::from_be_bytes([
-            disc_id[2],
-            disc_id[1],
-            disc_id[3].wrapping_add(disc_id[2]),
-            disc_id[0].wrapping_add(disc_id[1]),
-        ]) ^ disc_num as u32;
         let sector = (partition_offset / SECTOR_SIZE as u64) as u32;
-        let sector_offset = partition_offset % SECTOR_SIZE as u64;
-        let mut n = seed.wrapping_mul(0x260BCD5) ^ sector.wrapping_mul(0x1EF29123);
-        for i in 0..SEED_SIZE {
-            let mut v = 0u32;
-            for _ in 0..LFG_J {
-                n = n.wrapping_mul(0x5D588B65).wrapping_add(1);
-                v = (v >> 1) | (n & 0x80000000);
-            }
-            self.buffer[i] = v;
-        }
-        self.buffer[16] ^= self.buffer[0] >> 9 ^ self.buffer[16] << 23;
+        let sector_offset = (partition_offset % SECTOR_SIZE as u64) as usize;
+        Self::generate_seed(array_ref_mut![self.buffer, 0, SEED_SIZE], disc_id, disc_num, sector);
         self.position = 0;
         self.init();
-        self.skip(sector_offset as usize);
+        self.skip(sector_offset);
     }
 
     /// Initializes the LFG with the seed read from a reader. The seed is assumed to be big-endian.
@@ -112,6 +135,9 @@ impl LaggedFibonacci {
     }
 
     /// Advances the LFG by one step.
+    // This gets vectorized and aggressively inlined, so it's better to
+    // keep it separate for code size and instruction cache pressure.
+    #[inline(never)]
     fn forward(&mut self) {
         for i in 0..LFG_J {
             self.buffer[i] ^= self.buffer[i + LFG_K - LFG_J];
@@ -124,40 +150,25 @@ impl LaggedFibonacci {
     /// Skips `n` bytes of junk data.
     pub fn skip(&mut self, n: usize) {
         self.position += n;
-        while self.position >= LFG_K * 4 {
+        while self.position >= LFG_K_BYTES {
             self.forward();
-            self.position -= LFG_K * 4;
+            self.position -= LFG_K_BYTES;
         }
     }
-
-    // pub fn backward(&mut self) {
-    //     for i in (LFG_J..LFG_K).rev() {
-    //         self.buffer[i] ^= self.buffer[i - LFG_J];
-    //     }
-    //     for i in (0..LFG_J).rev() {
-    //         self.buffer[i] ^= self.buffer[i + LFG_K - LFG_J];
-    //     }
-    // }
-
-    // pub fn get_seed(&mut self, seed: &mut [u8; SEED_SIZE]) {
-    //     for i in 0..SEED_SIZE {
-    //         seed[i] = self.buffer[i].to_be_bytes()[3];
-    //     }
-    // }
 
     /// Fills the buffer with junk data.
     #[instrument(name = "LaggedFibonacci::fill", skip_all)]
     pub fn fill(&mut self, mut buf: &mut [u8]) {
         while !buf.is_empty() {
-            let len = min(buf.len(), LFG_K * 4 - self.position);
-            let bytes: &[u8; LFG_K * 4] = transmute_ref!(&self.buffer);
+            while self.position >= LFG_K_BYTES {
+                self.forward();
+                self.position -= LFG_K_BYTES;
+            }
+            let bytes: &[u8; LFG_K_BYTES] = transmute_ref!(&self.buffer);
+            let len = buf.len().min(LFG_K_BYTES - self.position);
             buf[..len].copy_from_slice(&bytes[self.position..self.position + len]);
             self.position += len;
             buf = &mut buf[len..];
-            if self.position == LFG_K * 4 {
-                self.forward();
-                self.position = 0;
-            }
         }
     }
 
@@ -166,15 +177,15 @@ impl LaggedFibonacci {
     pub fn write<W>(&mut self, w: &mut W, mut len: u64) -> io::Result<()>
     where W: Write + ?Sized {
         while len > 0 {
-            let write_len = min(len, LFG_K as u64 * 4 - self.position as u64) as usize;
-            let bytes: &[u8; LFG_K * 4] = transmute_ref!(&self.buffer);
+            while self.position >= LFG_K_BYTES {
+                self.forward();
+                self.position -= LFG_K_BYTES;
+            }
+            let bytes: &[u8; LFG_K_BYTES] = transmute_ref!(&self.buffer);
+            let write_len = len.min((LFG_K_BYTES - self.position) as u64) as usize;
             w.write_all(&bytes[self.position..self.position + write_len])?;
             self.position += write_len;
             len -= write_len as u64;
-            if self.position == LFG_K * 4 {
-                self.forward();
-                self.position = 0;
-            }
         }
         Ok(())
     }
@@ -223,6 +234,23 @@ impl LaggedFibonacci {
         Ok(())
     }
 
+    /// Checks if the data matches the junk data generated by the LFG, up to the first sector
+    /// boundary.
+    #[instrument(name = "LaggedFibonacci::check", skip_all)]
+    pub fn check(
+        &mut self,
+        buf: &[u8],
+        disc_id: [u8; 4],
+        disc_num: u8,
+        partition_offset: u64,
+    ) -> usize {
+        let mut lfg_buf = [0u8; SECTOR_SIZE];
+        self.init_with_seed(disc_id, disc_num, partition_offset);
+        let len = (SECTOR_SIZE - (partition_offset % SECTOR_SIZE as u64) as usize).min(buf.len());
+        self.fill(&mut lfg_buf[..len]);
+        buf[..len].iter().zip(&lfg_buf[..len]).take_while(|(a, b)| a == b).count()
+    }
+
     /// Checks if the data matches the junk data generated by the LFG. This function handles the
     /// wrapping logic and reinitializes the LFG at sector boundaries.
     #[instrument(name = "LaggedFibonacci::check_sector_chunked", skip_all)]
@@ -232,23 +260,24 @@ impl LaggedFibonacci {
         disc_id: [u8; 4],
         disc_num: u8,
         mut partition_offset: u64,
-    ) -> bool {
-        if buf.is_empty() {
-            return false;
-        }
+    ) -> usize {
         let mut lfg_buf = [0u8; SECTOR_SIZE];
+        let mut total_num_matching = 0;
         while !buf.is_empty() {
             self.init_with_seed(disc_id, disc_num, partition_offset);
             let len =
                 (SECTOR_SIZE - (partition_offset % SECTOR_SIZE as u64) as usize).min(buf.len());
             self.fill(&mut lfg_buf[..len]);
-            if buf[..len] != lfg_buf[..len] {
-                return false;
+            let num_matching =
+                buf[..len].iter().zip(&lfg_buf[..len]).take_while(|(a, b)| a == b).count();
+            total_num_matching += num_matching;
+            if num_matching != len {
+                break;
             }
             buf = &buf[len..];
             partition_offset += len as u64;
         }
-        true
+        total_num_matching
     }
 }
 

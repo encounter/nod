@@ -415,7 +415,7 @@ impl SectorGroupLoader {
                 sector_data,
                 self.block_buf.as_mut(),
                 abs_sector,
-                &partition.disc_header,
+                partition.disc_header(),
                 Some(partition),
             )?;
             if !encrypted {

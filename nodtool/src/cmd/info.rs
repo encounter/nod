@@ -92,12 +92,13 @@ fn info_file(path: &Path) -> nod::Result<()> {
             } else {
                 "N/A".to_string()
             };
-            println!("\tTitle: {}", info.disc_header.game_title_str());
-            println!("\tGame ID: {} ({})", info.disc_header.game_id_str(), title_id_str);
+            let part_disc_header = info.disc_header();
+            println!("\tTitle: {}", part_disc_header.game_title_str());
+            println!("\tGame ID: {} ({})", part_disc_header.game_id_str(), title_id_str);
             println!(
                 "\tDisc {}, Revision {}",
-                info.disc_header.disc_num + 1,
-                info.disc_header.disc_version
+                part_disc_header.disc_num + 1,
+                part_disc_header.disc_version
             );
         }
     } else if header.is_gamecube() {

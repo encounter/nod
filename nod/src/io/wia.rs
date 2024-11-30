@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    collections::{hash_map::Entry, BTreeSet, HashMap},
     io,
     io::{Read, Seek, SeekFrom},
     mem::size_of,
@@ -8,16 +9,17 @@ use std::{
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 use zerocopy::{big_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
 use crate::{
     common::{Compression, Format, HashBytes, KeyBytes, MagicBytes},
     disc::{
+        fst::Fst,
         reader::DiscReader,
-        wii::SECTOR_DATA_SIZE,
+        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         writer::{par_process, read_block, BlockProcessor, BlockResult, DataCallback, DiscWriter},
-        SECTOR_SIZE,
+        DiscHeader, PartitionHeader, SECTOR_SIZE,
     },
     io::{
         block::{Block, BlockKind, BlockReader, RVZ_MAGIC, WIA_MAGIC},
@@ -28,8 +30,8 @@ use crate::{
         aes::decrypt_sector_data_b2b,
         align_up_32, align_up_64, array_ref, array_ref_mut,
         compress::{Compressor, DecompressionKind, Decompressor},
-        digest::{sha1_hash, DigestManager},
-        lfg::LaggedFibonacci,
+        digest::{sha1_hash, xxh64_hash, DigestManager},
+        lfg::{LaggedFibonacci, SEED_SIZE, SEED_SIZE_BYTES},
         read::{read_arc_slice, read_from, read_vec},
         static_assert,
     },
@@ -326,11 +328,9 @@ pub struct WIAPartitionData {
 static_assert!(size_of::<WIAPartitionData>() == 0x10);
 
 impl WIAPartitionData {
-    pub fn start_offset(&self) -> u64 { self.first_sector.get() as u64 * SECTOR_SIZE as u64 }
+    pub fn start_sector(&self) -> u32 { self.first_sector.get() }
 
-    pub fn end_offset(&self) -> u64 {
-        self.start_offset() + self.num_sectors.get() as u64 * SECTOR_SIZE as u64
-    }
+    pub fn end_sector(&self) -> u32 { self.first_sector.get() + self.num_sectors.get() }
 
     pub fn contains_sector(&self, sector: u32) -> bool {
         let start = self.first_sector.get();
@@ -645,7 +645,7 @@ impl BlockReaderWIA {
             }
         }
         debug!("Num raw data: {}", raw_data.len());
-        // log::debug!("Raw data: {:?}", raw_data);
+        // debug!("Raw data: {:?}", raw_data);
 
         // Load group headers
         let groups = {
@@ -722,72 +722,154 @@ fn read_exception_lists(
     Ok(exception_lists)
 }
 
+struct GroupInfo {
+    /// The group index.
+    index: u32,
+    /// The disc sector at which the group starts.
+    sector: u32,
+    /// The number of sectors in the group.
+    num_sectors: u32,
+    /// The size of the group data in bytes. Usually equal to the chunk size (or
+    /// `chunk_size / 0x8000 * 0x7C00` for Wii partition data), but can be smaller for the last
+    /// group in a partition or raw data.
+    size: u32,
+    /// The offset within the section where the group data starts. For partition data, this is the
+    /// offset (excluding hashes) from the start of the partition. For raw data, this is the offset
+    /// from the start of the disc.
+    section_offset: u64,
+    /// Whether the group is in a partition (raw data otherwise).
+    in_partition: bool,
+    /// The partition title key (if encrypted).
+    partition_key: Option<KeyBytes>,
+}
+
+impl GroupInfo {
+    fn from_partition(index: u32, disc: &WIADisc, p: &WIAPartition, pd: &WIAPartitionData) -> Self {
+        let sectors_per_chunk = disc.chunk_size.get() / SECTOR_SIZE as u32;
+        let rel_group_idx = index - pd.group_index.get();
+        // Disc sector at which the group starts
+        let sector = pd.start_sector() + rel_group_idx * sectors_per_chunk;
+        // Size of the group, limited by the end of the partition data
+        let num_sectors = (pd.end_sector() - sector).min(sectors_per_chunk);
+        let size = num_sectors * SECTOR_DATA_SIZE as u32;
+        // Data offset within partition data (from start of partition)
+        let partition_offset =
+            (sector - p.partition_data[0].start_sector()) as u64 * SECTOR_DATA_SIZE as u64;
+        // Check if the partition is encrypted
+        let partition_key = (disc.disc_head[0x61] == 0).then_some(p.partition_key);
+        Self {
+            index,
+            sector,
+            num_sectors,
+            size,
+            section_offset: partition_offset,
+            in_partition: true,
+            partition_key,
+        }
+    }
+
+    fn from_raw_data(index: u32, disc: &WIADisc, rd: &WIARawData) -> Self {
+        let chunk_size = disc.chunk_size.get();
+        let sectors_per_chunk = chunk_size / SECTOR_SIZE as u32;
+        let rel_group_idx = index - rd.group_index.get();
+        // Disc sector at which the group starts
+        let sector = rd.start_sector() + rel_group_idx * sectors_per_chunk;
+        // Size of the group, limited by the end of the raw data
+        let size =
+            (rd.end_offset() - (sector as u64 * SECTOR_SIZE as u64)).min(chunk_size as u64) as u32;
+        let num_sectors = size.div_ceil(SECTOR_SIZE as u32);
+        // Data offset within disc data
+        let partition_offset = sector as u64 * SECTOR_SIZE as u64;
+        Self {
+            index,
+            sector,
+            num_sectors,
+            size,
+            section_offset: partition_offset,
+            in_partition: false,
+            partition_key: None,
+        }
+    }
+}
+
+fn find_group_info(
+    idx: u32,
+    disc: &WIADisc,
+    partitions: &[WIAPartition],
+    raw_data: &[WIARawData],
+) -> Option<GroupInfo> {
+    partitions
+        .iter()
+        .find_map(|p| {
+            p.partition_data.iter().find_map(|pd| {
+                pd.contains_group(idx).then(|| GroupInfo::from_partition(idx, disc, p, pd))
+            })
+        })
+        .or_else(|| {
+            raw_data.iter().find_map(|rd| {
+                rd.contains_group(idx).then(|| GroupInfo::from_raw_data(idx, disc, rd))
+            })
+        })
+}
+
+fn find_group_info_for_sector(
+    sector: u32,
+    disc: &WIADisc,
+    partitions: &[WIAPartition],
+    raw_data: &[WIARawData],
+) -> Option<GroupInfo> {
+    let sectors_per_chunk = disc.chunk_size.get() / SECTOR_SIZE as u32;
+    partitions
+        .iter()
+        .find_map(|p| {
+            p.partition_data.iter().find_map(|pd| {
+                pd.contains_sector(sector).then(|| {
+                    let rel_group_idx = (sector - pd.start_sector()) / sectors_per_chunk;
+                    GroupInfo::from_partition(pd.group_index.get() + rel_group_idx, disc, p, pd)
+                })
+            })
+        })
+        .or_else(|| {
+            raw_data.iter().find_map(|rd| {
+                rd.contains_sector(sector).then(|| {
+                    let rel_group_idx = (sector - rd.start_sector()) / sectors_per_chunk;
+                    GroupInfo::from_raw_data(rd.group_index.get() + rel_group_idx, disc, rd)
+                })
+            })
+        })
+}
+
 impl BlockReader for BlockReaderWIA {
     #[instrument(name = "BlockReaderWIA::read_block", skip_all)]
     fn read_block(&mut self, out: &mut [u8], sector: u32) -> io::Result<Block> {
-        let chunk_size = self.disc.chunk_size.get();
-        let sectors_per_chunk = chunk_size / SECTOR_SIZE as u32;
-
-        let (group_index, group_sector, end_offset, partition_offset, in_partition) =
-            if let Some((p, pd)) = self.partitions.iter().find_map(|p| {
-                p.partition_data.iter().find_map(|pd| pd.contains_sector(sector).then_some((p, pd)))
-            }) {
-                let pd_group_idx = (sector - pd.first_sector.get()) / sectors_per_chunk;
-                (
-                    pd.group_index.get() + pd_group_idx,
-                    pd.first_sector.get() + pd_group_idx * sectors_per_chunk,
-                    pd.end_offset(),
-                    // Data offset within partition data (from start of partition)
-                    (sector - p.partition_data[0].first_sector.get()) as u64
-                        * SECTOR_DATA_SIZE as u64,
-                    true,
-                )
-            } else if let Some(rd) = self.raw_data.iter().find(|rd| rd.contains_sector(sector)) {
-                let rd_group_idx = (sector - rd.start_sector()) / sectors_per_chunk;
-                (
-                    rd.group_index.get() + rd_group_idx,
-                    rd.start_sector() + rd_group_idx * sectors_per_chunk,
-                    rd.end_offset(),
-                    0, // Always on a sector boundary
-                    false,
-                )
-            } else {
-                return Ok(Block::sector(sector, BlockKind::None));
-            };
-
-        // Round up to handle unaligned raw data end offset
-        let end_sector = end_offset.div_ceil(SECTOR_SIZE as u64) as u32;
-        let group_sectors = (end_sector - group_sector).min(sectors_per_chunk);
-        let group_size = if in_partition {
-            // Partition data does not include hashes
-            group_sectors * SECTOR_DATA_SIZE as u32
-        } else {
-            (group_sectors as u64 * SECTOR_SIZE as u64)
-                // Last group might be smaller than a sector
-                .min(end_offset - (group_sector as u64 * SECTOR_SIZE as u64)) as u32
+        let Some(info) =
+            find_group_info_for_sector(sector, &self.disc, &self.partitions, &self.raw_data)
+        else {
+            // Out of bounds
+            return Ok(Block::sector(sector, BlockKind::None));
         };
-        if group_size as usize > out.len() {
+        if info.size as usize > out.len() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
                     "Output buffer too small for WIA/RVZ group data: {} < {}",
                     out.len(),
-                    group_size
+                    info.size
                 ),
             ));
         }
 
         // Fetch the group
-        let Some(group) = self.groups.get(group_index as usize) else {
+        let Some(group) = self.groups.get(info.index as usize) else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Couldn't find WIA/RVZ group index {}", group_index),
+                format!("Couldn't find WIA/RVZ group index {}", info.index),
             ));
         };
 
         // Special case for all-zero data
         if group.data_size() == 0 {
-            return Ok(Block::sectors(group_sector, group_sectors, BlockKind::Zero));
+            return Ok(Block::sectors(info.sector, info.num_sectors, BlockKind::Zero));
         }
 
         let group_data_start = group.data_offset.get() as u64 * 4;
@@ -798,11 +880,12 @@ impl BlockReader for BlockReaderWIA {
         let io_duration = io_start.elapsed();
         let mut group_data = group_data.freeze();
 
+        let chunk_size = self.disc.chunk_size.get();
         let uncompressed_exception_lists =
             matches!(self.disc.compression(), WIACompression::None | WIACompression::Purge)
                 || !group.is_compressed();
         let mut exception_lists = vec![];
-        if in_partition && uncompressed_exception_lists {
+        if info.in_partition && uncompressed_exception_lists {
             exception_lists = read_exception_lists(&mut group_data, chunk_size, true)?;
         }
         let mut decompressed = if group.is_compressed() {
@@ -813,67 +896,46 @@ impl BlockReader for BlockReaderWIA {
         } else {
             group_data
         };
-        if in_partition && !uncompressed_exception_lists {
+        if info.in_partition && !uncompressed_exception_lists {
             exception_lists = read_exception_lists(&mut decompressed, chunk_size, false)?;
         }
 
         if group.rvz_packed_size.get() > 0 {
             // Decode RVZ packed data
-            let mut read = 0;
-            let mut lfg = LaggedFibonacci::default();
-            while decompressed.remaining() >= 4 {
-                let size = decompressed.get_u32();
-                if size & 0x80000000 != 0 {
-                    // Junk data
-                    let size = size & 0x7FFFFFFF;
-                    lfg.init_with_buf(&mut decompressed)?;
-                    lfg.skip(((partition_offset + read as u64) % SECTOR_SIZE as u64) as usize);
-                    lfg.fill(&mut out[read..read + size as usize]);
-                    read += size as usize;
-                } else {
-                    // Real data
-                    decompressed.copy_to_slice(&mut out[read..read + size as usize]);
-                    read += size as usize;
-                }
-            }
-            if read != group_size as usize {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("RVZ packed data size mismatch: {} != {}", read, group_size),
-                ));
-            }
+            rvz_unpack(&mut decompressed, out, &info)?;
         } else {
             // Read and decompress data
-            if decompressed.remaining() != group_size as usize {
+            if decompressed.remaining() != info.size as usize {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
                         "WIA/RVZ group {} data size mismatch: {} != {}",
-                        group_index,
+                        info.index,
                         decompressed.remaining(),
-                        group_size
+                        info.size
                     ),
                 ));
             }
-            decompressed.copy_to_slice(&mut out[..group_size as usize]);
+            decompressed.copy_to_slice(&mut out[..info.size as usize]);
         }
         if !decompressed.is_empty() {
             return Err(io::Error::new(io::ErrorKind::Other, "Failed to consume all group data"));
         }
 
         // Read first 0x80 bytes from disc header
-        if group_sector == 0 {
+        if info.sector == 0 {
             *array_ref_mut![out, 0, DISC_HEAD_SIZE] = self.disc.disc_head;
         }
 
-        let mut block = if in_partition {
-            let mut block = Block::sectors(group_sector, group_sectors, BlockKind::PartDecrypted {
-                hash_block: false,
-            });
+        let mut block = if info.in_partition {
+            let mut block =
+                Block::sectors(info.sector, info.num_sectors, BlockKind::PartDecrypted {
+                    hash_block: false,
+                });
             block.hash_exceptions = exception_lists.into_boxed_slice();
             block
         } else {
-            Block::sectors(group_sector, group_sectors, BlockKind::Raw)
+            Block::sectors(info.sector, info.num_sectors, BlockKind::Raw)
         };
         block.io_duration = Some(io_duration);
         Ok(block)
@@ -906,6 +968,47 @@ impl BlockReader for BlockReaderWIA {
     }
 }
 
+#[instrument(name = "rvz_unpack", skip_all)]
+fn rvz_unpack(data: &mut impl Buf, out: &mut [u8], info: &GroupInfo) -> io::Result<()> {
+    let mut read = 0;
+    let mut lfg = LaggedFibonacci::default();
+    while data.remaining() >= 4 {
+        let size = data.get_u32();
+        let remain = out.len() - read;
+        if size & 0x80000000 != 0 {
+            // Junk data
+            let size = size & 0x7FFFFFFF;
+            if size as usize > remain {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("RVZ packed junk size too large: {} > {}", size, remain),
+                ));
+            }
+            lfg.init_with_buf(data)?;
+            lfg.skip(((info.section_offset + read as u64) % SECTOR_SIZE as u64) as usize);
+            lfg.fill(&mut out[read..read + size as usize]);
+            read += size as usize;
+        } else {
+            // Real data
+            if size as usize > remain {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("RVZ packed data size too large: {} > {}", size, remain),
+                ));
+            }
+            data.copy_to_slice(&mut out[read..read + size as usize]);
+            read += size as usize;
+        }
+    }
+    if read != info.size as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("RVZ packed data size mismatch: {} != {}", read, info.size),
+        ));
+    }
+    Ok(())
+}
+
 struct BlockProcessorWIA {
     inner: DiscReader,
     header: WIAFileHeader,
@@ -913,7 +1016,8 @@ struct BlockProcessorWIA {
     partitions: Arc<[WIAPartition]>,
     raw_data: Arc<[WIARawData]>,
     compressor: Compressor,
-    // lfg: LaggedFibonacci,
+    lfg: LaggedFibonacci,
+    junk_info: Arc<[JunkInfo]>,
 }
 
 impl Clone for BlockProcessorWIA {
@@ -925,16 +1029,56 @@ impl Clone for BlockProcessorWIA {
             partitions: self.partitions.clone(),
             raw_data: self.raw_data.clone(),
             compressor: self.compressor.clone(),
-            // lfg: LaggedFibonacci::default(),
+            lfg: LaggedFibonacci::default(),
+            junk_info: self.junk_info.clone(),
         }
     }
 }
 
-#[allow(unused)]
+#[derive(Default)]
 struct BlockMetaWIA {
     is_compressed: bool,
-    is_rvz_packed: bool,
     data_size: u32, // Not aligned
+    rvz_packed_size: u32,
+    data_hash: u64,
+}
+
+#[derive(Clone)]
+struct JunkInfo {
+    start_sector: u32,
+    end_sector: u32,
+    file_ends: BTreeSet<u64>,
+    disc_id: [u8; 4],
+    disc_num: u8,
+}
+
+impl JunkInfo {
+    fn from_fst(
+        start_sector: u32,
+        end_sector: u32,
+        disc_header: &DiscHeader,
+        partition_header: Option<&PartitionHeader>,
+        fst: Option<Fst>,
+    ) -> Self {
+        let is_wii = disc_header.is_wii();
+        let mut file_ends = BTreeSet::new();
+        if let Some(partition_header) = partition_header {
+            file_ends
+                .insert(partition_header.fst_offset(is_wii) + partition_header.fst_size(is_wii));
+        }
+        if let Some(fst) = fst {
+            for entry in fst.nodes.iter().filter(|n| n.is_file()) {
+                file_ends.insert(entry.offset(is_wii) + entry.length() as u64);
+            }
+        }
+        Self {
+            start_sector,
+            end_sector,
+            file_ends,
+            disc_id: *array_ref![disc_header.game_id, 0, 4],
+            disc_num: disc_header.disc_num,
+        }
+    }
 }
 
 impl BlockProcessor for BlockProcessorWIA {
@@ -942,130 +1086,118 @@ impl BlockProcessor for BlockProcessorWIA {
 
     #[instrument(name = "BlockProcessorWIA::process_block", skip_all)]
     fn process_block(&mut self, group_idx: u32) -> io::Result<BlockResult<Self::BlockMeta>> {
-        let is_rvz = self.header.is_rvz();
-        let chunk_size = self.disc.chunk_size.get() as u64;
-        let (group_start, section_end, key) = if let Some((p, pd)) =
-            self.partitions.iter().find_map(|p| {
-                p.partition_data
-                    .iter()
-                    .find_map(|pd| pd.contains_group(group_idx).then_some((p, pd)))
-            }) {
-            let part_group_offset = (group_idx - pd.group_index.get()) as u64 * chunk_size;
-            (pd.start_offset() + part_group_offset, pd.end_offset(), Some(p.partition_key))
-        } else if let Some(rd) = self.raw_data.iter().find(|rd| rd.contains_group(group_idx)) {
-            (
-                rd.start_offset() + (group_idx - rd.group_index.get()) as u64 * chunk_size,
-                rd.end_offset(),
-                None,
-            )
-        } else {
-            return Err(io::Error::new(
+        let info = find_group_info(
+            group_idx,
+            &self.disc,
+            self.partitions.as_ref(),
+            self.raw_data.as_ref(),
+        )
+        .ok_or_else(|| {
+            io::Error::new(
                 io::ErrorKind::Other,
                 format!("Couldn't find partition or raw data for group {}", group_idx),
-            ));
-        };
+            )
+        })?;
 
-        let group_size = (section_end - group_start).min(chunk_size) as usize;
-        self.inner.seek(SeekFrom::Start(group_start))?;
-        let (_, disc_data) = read_block(&mut self.inner, group_size)?;
+        self.inner.seek(SeekFrom::Start(info.sector as u64 * SECTOR_SIZE as u64))?;
+        let (_, disc_data) = read_block(&mut self.inner, info.num_sectors as usize * SECTOR_SIZE)?;
 
         // Decrypt group and calculate hash exceptions
-        let (block_data, data_size, exceptions_end) = if let Some(key) = key {
-            if disc_data.len() % SECTOR_SIZE != 0 {
+        let is_rvz = self.header.is_rvz();
+        let chunk_size = self.disc.chunk_size.get() as u64;
+        let (mut group_data, hash_exception_data) = if info.in_partition {
+            if info.size % SECTOR_DATA_SIZE as u32 != 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     "Partition group size not aligned to sector",
                 ));
             }
+
+            let mut buf = BytesMut::zeroed(info.size as usize);
+            if let Some(key) = info.partition_key {
+                // Encrypted partition
+                for i in 0..info.num_sectors as usize {
+                    decrypt_sector_data_b2b(
+                        array_ref![disc_data, i * SECTOR_SIZE, SECTOR_SIZE],
+                        array_ref_mut![buf, i * SECTOR_DATA_SIZE, SECTOR_DATA_SIZE],
+                        &key,
+                    );
+                }
+            } else {
+                // Unencrypted partition
+                for i in 0..info.num_sectors as usize {
+                    *array_ref_mut![buf, i * SECTOR_DATA_SIZE, SECTOR_DATA_SIZE] =
+                        *array_ref![disc_data, i * SECTOR_SIZE + HASHES_SIZE, SECTOR_DATA_SIZE];
+                }
+            }
+
+            // Generate hash exceptions
             let num_exception_list = (chunk_size as usize).div_ceil(0x200000); // 2 MiB
-            let mut buf = BytesMut::with_capacity(chunk_size as usize);
+            let mut exceptions_buf = BytesMut::with_capacity(num_exception_list * 2);
             for _ in 0..num_exception_list {
-                buf.put_u16(0); // num_exceptions
+                // TODO
+                exceptions_buf.put_u16(0); // num_exceptions
             }
 
-            // Align to 4 after exception lists.
-            // We'll "undo" this for compression, see below.
-            let exceptions_end = buf.len();
-            let rem = buf.len() % 4;
-            if rem != 0 {
-                buf.put_bytes(0, 4 - rem);
-            }
-
-            for i in 0..disc_data.len() / SECTOR_SIZE {
-                let offset = buf.len();
-                buf.resize(offset + SECTOR_DATA_SIZE, 0);
-                decrypt_sector_data_b2b(
-                    array_ref![disc_data, i * SECTOR_SIZE, SECTOR_SIZE],
-                    array_ref_mut![buf, offset, SECTOR_DATA_SIZE],
-                    &key,
-                );
-                // TODO hash exceptions
-            }
-
-            // Use pre-alignment for data size
-            let data_size = buf.len() as u32;
-            // Align to 4
-            let rem = buf.len() % 4;
-            if rem != 0 {
-                buf.put_bytes(0, 4 - rem);
-            }
-            (buf.freeze(), data_size, exceptions_end)
+            (buf.freeze(), exceptions_buf.freeze())
         } else {
-            if disc_data.len() % 4 != 0 {
-                return Err(io::Error::new(io::ErrorKind::Other, "Raw data size not aligned to 4"));
-            }
-            (disc_data.clone(), disc_data.len() as u32, 0)
+            (disc_data.clone(), Bytes::new())
         };
 
-        // Compress group
-        let buf = &block_data[..data_size as usize];
-        if buf.iter().all(|&b| b == 0) {
+        let uncompressed_size =
+            align_up_32(hash_exception_data.len() as u32, 4) + group_data.len() as u32;
+        if hash_exception_data.as_ref().iter().all(|&b| b == 0)
+            && group_data.as_ref().iter().all(|&b| b == 0)
+        {
             // Skip empty group
             return Ok(BlockResult {
                 block_idx: group_idx,
                 disc_data,
                 block_data: Bytes::new(),
-                meta: BlockMetaWIA { is_compressed: false, is_rvz_packed: false, data_size: 0 },
+                meta: BlockMetaWIA::default(),
             });
         }
-        if self.compressor.kind != Compression::None {
-            let rem = exceptions_end % 4;
-            let compressed = if rem != 0 {
-                // Annoyingly, hash exceptions are aligned to 4 bytes _only if_ they're uncompressed.
-                // We need to create an entirely separate buffer _without_ the alignment for
-                // compression. If we end up writing the uncompressed data, we'll use the original,
-                // aligned buffer.
-                let pad = 4 - rem;
-                let mut buf = <[u8]>::new_box_zeroed_with_elems(data_size as usize - pad).unwrap();
-                buf[..exceptions_end].copy_from_slice(&block_data[..exceptions_end]);
-                buf[exceptions_end..].copy_from_slice(&block_data[exceptions_end + pad..]);
-                self.compressor.compress(buf.as_ref())
-            } else {
-                self.compressor.compress(buf)
+
+        let mut meta = BlockMetaWIA {
+            is_compressed: false,
+            data_size: uncompressed_size,
+            rvz_packed_size: 0,
+            data_hash: 0,
+        };
+        if is_rvz {
+            if let Some(packed_data) = self.try_rvz_pack(group_data.as_ref(), &info) {
+                meta.data_size =
+                    align_up_32(hash_exception_data.len() as u32, 4) + packed_data.len() as u32;
+                meta.rvz_packed_size = packed_data.len() as u32;
+                group_data = packed_data;
             }
-            .map_err(|e| {
+        }
+
+        // Compress group
+        if self.compressor.kind != Compression::None {
+            // Compressed data has no alignment between hash exceptions and data or at the end
+            let mut buf = BytesMut::with_capacity(hash_exception_data.len() + group_data.len());
+            buf.put_slice(hash_exception_data.as_ref());
+            buf.put_slice(group_data.as_ref());
+            if self.compressor.compress(buf.as_ref()).map_err(|e| {
                 io::Error::new(io::ErrorKind::Other, format!("Failed to compress group: {}", e))
-            })?;
-            if compressed {
-                let compressed_size = self.compressor.buffer.len();
+            })? {
+                let compressed_size = self.compressor.buffer.len() as u32;
                 // For WIA, we must always store compressed data.
                 // For RVZ, only store compressed data if it's smaller than uncompressed.
-                if !is_rvz || align_up_32(compressed_size as u32, 4) < data_size {
-                    let rem = compressed_size % 4;
-                    if rem != 0 {
-                        // Align to 4
-                        self.compressor.buffer.resize(compressed_size + (4 - rem), 0);
-                    }
-                    let block_data = Bytes::copy_from_slice(self.compressor.buffer.as_slice());
+                if !is_rvz || align_up_32(compressed_size, 4) < meta.data_size {
+                    // Align resulting block data to 4 bytes
+                    let mut buf = BytesMut::zeroed(align_up_32(compressed_size, 4) as usize);
+                    buf[..compressed_size as usize].copy_from_slice(&self.compressor.buffer);
+                    meta.is_compressed = true;
+                    // Data size does not include end alignment
+                    meta.data_size = compressed_size;
+                    meta.data_hash = xxh64_hash(buf.as_ref());
                     return Ok(BlockResult {
                         block_idx: group_idx,
                         disc_data,
-                        block_data,
-                        meta: BlockMetaWIA {
-                            is_compressed: true,
-                            is_rvz_packed: false,
-                            data_size: compressed_size as u32,
-                        },
+                        block_data: buf.freeze(),
+                        meta,
                     });
                 }
             } else if !is_rvz {
@@ -1081,18 +1213,193 @@ impl BlockProcessor for BlockProcessorWIA {
             }
         }
 
-        // Store uncompressed group
-        Ok(BlockResult {
-            block_idx: group_idx,
-            disc_data,
-            block_data,
-            meta: BlockMetaWIA { is_compressed: false, is_rvz_packed: false, data_size },
-        })
+        // Store uncompressed group, aligned to 4 bytes after hash exceptions and at the end
+        let mut buf = BytesMut::zeroed(align_up_32(meta.data_size, 4) as usize);
+        buf[..hash_exception_data.len()].copy_from_slice(hash_exception_data.as_ref());
+        let offset = align_up_32(hash_exception_data.len() as u32, 4) as usize;
+        buf[offset..offset + group_data.len()].copy_from_slice(group_data.as_ref());
+        meta.data_hash = xxh64_hash(buf.as_ref());
+        Ok(BlockResult { block_idx: group_idx, disc_data, block_data: buf.freeze(), meta })
     }
 }
 
-#[allow(unused)]
-fn try_rvz_pack(_data: &[u8]) -> bool { todo!("RVZ packing") }
+impl BlockProcessorWIA {
+    #[instrument(name = "BlockProcessorWIA::try_rvz_pack", skip_all)]
+    fn try_rvz_pack(&mut self, data: &[u8], info: &GroupInfo) -> Option<Bytes> {
+        let Some(junk_info) = self
+            .junk_info
+            .iter()
+            .find(|r| info.sector >= r.start_sector && info.sector < r.end_sector)
+        else {
+            warn!("No junk info found for sector {}", info.sector);
+            return None;
+        };
+
+        let mut junk_areas = vec![];
+        let mut lfg_buf = [0u8; SECTOR_SIZE];
+        let mut lfg_sector = u32::MAX;
+        let mut offset = info.section_offset;
+        let mut data_offset = 0;
+        while data_offset < data.len() {
+            let sector = (offset / SECTOR_SIZE as u64) as u32;
+            let sector_offset = (offset % SECTOR_SIZE as u64) as usize;
+
+            // Initialize LFG for each sector
+            if sector != lfg_sector {
+                self.lfg.init_with_seed(
+                    junk_info.disc_id,
+                    junk_info.disc_num,
+                    sector as u64 * SECTOR_SIZE as u64,
+                );
+                self.lfg.fill(&mut lfg_buf);
+                lfg_sector = sector;
+            }
+
+            // Skip any zeroes
+            let zeroes = data[data_offset..].iter().take_while(|&&b| b == 0).count();
+            if zeroes > 0 {
+                // ...only if they're not LFG zeroes
+                let lfg_zeroes = lfg_buf[sector_offset..].iter().take_while(|&&b| b == 0).count();
+                if zeroes > lfg_zeroes {
+                    // When we have a lot of zeroes, we can pack them as junk data.
+                    // We only do this if we're _not_ compressing the data, as the compression
+                    // will likely handle this better.
+                    if self.compressor.kind == Compression::None && zeroes > SEED_SIZE_BYTES + 4 {
+                        debug!("Packing {} zero bytes in group {}", zeroes, info.index);
+                        junk_areas.push((data_offset, u32::MAX, zeroes));
+                    }
+
+                    offset += zeroes as u64;
+                    data_offset += zeroes;
+                    continue;
+                }
+            }
+
+            // Check for junk data
+            let len = (SECTOR_SIZE - sector_offset).min(data.len() - data_offset);
+            let sector_end = offset + len as u64;
+            let num_match = data[data_offset..data_offset + len]
+                .iter()
+                .zip(&lfg_buf[sector_offset..sector_offset + len])
+                .take_while(|(a, b)| a == b)
+                .count();
+            if num_match > SEED_SIZE_BYTES + 4 {
+                debug!("Matched {} junk bytes at offset {:#X}", num_match, offset);
+                junk_areas.push((data_offset, sector, num_match));
+                offset += num_match as u64;
+                data_offset += num_match;
+            }
+
+            if offset < sector_end {
+                // Jump to the end of the next file, if any exist in this sector
+                // Junk data may start after the end of the file
+                let next_offset = junk_info
+                    .file_ends
+                    .range(offset + 1..sector_end)
+                    .next()
+                    .cloned()
+                    // Otherwise, jump to the next sector
+                    .unwrap_or(sector_end);
+
+                let skip = (next_offset - offset) as usize;
+                offset = next_offset;
+                data_offset += skip;
+            }
+        }
+
+        fn write_raw_data(
+            data: &[u8],
+            out: &mut [u8],
+            offset: usize,
+            len: usize,
+            data_offset: usize,
+        ) {
+            *array_ref_mut![out, offset, 4] = (len as u32).to_be_bytes();
+            out[offset + 4..offset + 4 + len]
+                .copy_from_slice(&data[data_offset..data_offset + len]);
+        }
+
+        fn write_junk_data(
+            out: &mut [u8],
+            offset: usize,
+            len: usize,
+            sector: u32,
+            junk_info: &JunkInfo,
+        ) {
+            let mut seed_out = [0u32; SEED_SIZE];
+            // We use u32::MAX as a marker for zeroed data (LFG seed all zeroes)
+            if sector != u32::MAX {
+                LaggedFibonacci::generate_seed_be(
+                    &mut seed_out,
+                    junk_info.disc_id,
+                    junk_info.disc_num,
+                    sector,
+                );
+            }
+            *array_ref_mut![out, offset, 4] = (len as u32 | 0x80000000).to_be_bytes();
+            array_ref_mut![out, offset + 4, SEED_SIZE_BYTES].copy_from_slice(seed_out.as_bytes());
+        }
+
+        if !junk_areas.is_empty() {
+            let mut packed_data_len = 0;
+            let mut last_data_offset = 0;
+            for &(data_offset, _, num_match) in &junk_areas {
+                if data_offset > last_data_offset {
+                    packed_data_len += 4 + data_offset - last_data_offset;
+                }
+                packed_data_len += 4 + SEED_SIZE_BYTES;
+                last_data_offset = data_offset + num_match;
+            }
+            if last_data_offset < data.len() {
+                packed_data_len += 4 + data.len() - last_data_offset;
+            }
+            let mut packed_data = BytesMut::zeroed(packed_data_len);
+            let mut packed_data_offset = 0;
+            last_data_offset = 0;
+            for &(data_offset, sector, len) in &junk_areas {
+                if data_offset > last_data_offset {
+                    let len = data_offset - last_data_offset;
+                    write_raw_data(
+                        data,
+                        packed_data.as_mut(),
+                        packed_data_offset,
+                        len,
+                        last_data_offset,
+                    );
+                    packed_data_offset += 4 + len;
+                }
+                write_junk_data(packed_data.as_mut(), packed_data_offset, len, sector, junk_info);
+                packed_data_offset += 4 + SEED_SIZE_BYTES;
+                last_data_offset = data_offset + len;
+            }
+            if last_data_offset < data.len() {
+                let len = data.len() - last_data_offset;
+                write_raw_data(
+                    data,
+                    packed_data.as_mut(),
+                    packed_data_offset,
+                    len,
+                    last_data_offset,
+                );
+                packed_data_offset += 4 + len;
+                last_data_offset += len;
+            }
+            assert_eq!(packed_data_offset, packed_data_len);
+            assert_eq!(last_data_offset, data.len());
+            let packed_data = packed_data.freeze();
+
+            // let mut out = BytesMut::zeroed(data.len());
+            // rvz_unpack(&mut packed_data.clone(), out.as_mut(), info).unwrap();
+            // if out.as_ref() != data {
+            //     panic!("Decompressed data mismatch in group {}", info.index);
+            // }
+
+            return Some(packed_data);
+        }
+
+        None
+    }
+}
 
 #[derive(Clone)]
 pub struct DiscWriterWIA {
@@ -1106,6 +1413,7 @@ pub struct DiscWriterWIA {
     is_rvz: bool,
     compression: Compression,
     initial_header_data: Bytes, // TODO remove
+    junk_info: Arc<[JunkInfo]>,
 }
 
 #[inline]
@@ -1136,7 +1444,7 @@ impl DiscWriterWIA {
                 continue;
             }
             num_partitions += 1;
-            num_raw_data += 1;
+            num_raw_data += 2;
         }
         // println!("Num partitions: {}", num_partitions);
         // println!("Num raw data: {}", num_raw_data);
@@ -1215,23 +1523,37 @@ impl DiscWriterWIA {
         for (partition, wia_partition) in
             partition_info.iter().filter(|p| p.has_hashes).zip(partitions.iter_mut())
         {
-            let partition_start = partition.data_start_sector as u64 * SECTOR_SIZE as u64;
+            let partition_start = partition.start_sector as u64 * SECTOR_SIZE as u64;
+            let partition_data_start = partition.data_start_sector as u64 * SECTOR_SIZE as u64;
             let partition_end = partition.data_end_sector as u64 * SECTOR_SIZE as u64;
 
-            let partition_header = partition.partition_header.as_ref();
+            let partition_header = partition.partition_header();
             let management_data_end = align_up_64(
-                partition_header.fst_offset(true) + partition_header.fst_size(true),
+                partition_offset_to_raw(
+                    partition_header.fst_offset(true) + partition_header.fst_size(true),
+                ),
                 0x200000, // Align to 2 MiB
             );
-            let management_end_sector = ((partition_start
-                + partition_offset_to_raw(management_data_end))
-            .min(partition_end)
+            let management_end_sector = ((partition_data_start + management_data_end)
+                .min(partition_end)
                 / SECTOR_SIZE as u64) as u32;
 
             {
                 let cur_raw_data = &mut raw_data[raw_data_idx];
                 let raw_data_size = partition_start - cur_raw_data.raw_data_offset.get();
                 let raw_data_groups = raw_data_size.div_ceil(chunk_size as u64) as u32;
+                cur_raw_data.raw_data_size = raw_data_size.into();
+                cur_raw_data.group_index = group_idx.into();
+                cur_raw_data.num_groups = raw_data_groups.into();
+                group_idx += raw_data_groups;
+                raw_data_idx += 1;
+            }
+
+            {
+                let cur_raw_data = &mut raw_data[raw_data_idx];
+                let raw_data_size = partition_data_start - partition_start;
+                let raw_data_groups = raw_data_size.div_ceil(chunk_size as u64) as u32;
+                cur_raw_data.raw_data_offset = partition_start.into();
                 cur_raw_data.raw_data_size = raw_data_size.into();
                 cur_raw_data.group_index = group_idx.into();
                 cur_raw_data.num_groups = raw_data_groups.into();
@@ -1298,6 +1620,26 @@ impl DiscWriterWIA {
         // println!("Partitions: {:?}", partitions);
         // println!("Raw data: {:?}", raw_data);
 
+        // Calculate junk info
+        let mut junk_info = Vec::<JunkInfo>::with_capacity(partitions.len() + 1);
+        // Add partitions first, taking precedence over the raw disc
+        for partition in inner.partitions() {
+            junk_info.push(JunkInfo::from_fst(
+                partition.data_start_sector,
+                partition.data_end_sector,
+                partition.disc_header(),
+                Some(partition.partition_header()),
+                partition.fst(),
+            ));
+        }
+        junk_info.push(JunkInfo::from_fst(
+            0,
+            disc_size.div_ceil(SECTOR_SIZE as u64) as u32,
+            disc_header,
+            inner.partition_header(),
+            inner.fst(),
+        ));
+
         let data_start = header_data.len() as u32;
 
         Ok(Box::new(Self {
@@ -1311,6 +1653,7 @@ impl DiscWriterWIA {
             is_rvz,
             compression: options.compression,
             initial_header_data: header_data.freeze(),
+            junk_info: Arc::from(junk_info),
         }))
     }
 }
@@ -1341,6 +1684,8 @@ impl DiscWriter for DiscWriterWIA {
         let mut input_position = 0;
         let mut file_position = self.data_start as u64;
         let mut groups = <[RVZGroup]>::new_box_zeroed_with_elems(self.group_count as usize)?;
+        let mut group_hashes = HashMap::<u64, u32>::new();
+        let mut reuse_size = 0;
         par_process(
             || BlockProcessorWIA {
                 inner: self.inner.clone(),
@@ -1349,29 +1694,48 @@ impl DiscWriter for DiscWriterWIA {
                 partitions: self.partitions.clone(),
                 raw_data: self.raw_data.clone(),
                 compressor: compressor.clone(),
-                // lfg: LaggedFibonacci::default(),
+                lfg: LaggedFibonacci::default(),
+                junk_info: self.junk_info.clone(),
             },
             self.group_count,
             options.processor_threads,
             |group| -> Result<()> {
                 // Update hashers
-                let disc_data_len = group.disc_data.len() as u64;
+                input_position += group.disc_data.len() as u64;
                 digest.send(group.disc_data);
 
                 let group_idx = group.block_idx;
                 if file_position % 4 != 0 {
                     return Err(Error::Other("File position not aligned to 4".to_string()));
                 }
+                let data_offset = (file_position / 4) as u32;
                 groups[group_idx as usize] = RVZGroup {
-                    data_offset: ((file_position / 4) as u32).into(),
+                    data_offset: data_offset.into(),
                     data_size_and_flag: (group.meta.data_size
                         | if group.meta.is_compressed { 0x80000000 } else { 0 })
                     .into(),
-                    rvz_packed_size: 0.into(), // TODO
+                    rvz_packed_size: group.meta.rvz_packed_size.into(),
                 };
 
+                // Skip empty group
+                if group.meta.data_size == 0 {
+                    return Ok(());
+                }
+
+                // Reuse group data if possible
+                match group_hashes.entry(group.meta.data_hash) {
+                    Entry::Occupied(e) => {
+                        debug!("Reusing group data offset {} for group {}", e.get(), group_idx);
+                        groups[group_idx as usize].data_offset = (*e.get()).into();
+                        reuse_size += group.block_data.len();
+                        return Ok(());
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert(data_offset);
+                    }
+                }
+
                 // Write group data
-                input_position += disc_data_len;
                 if group.block_data.len() % 4 != 0 {
                     return Err(Error::Other("Group data size not aligned to 4".to_string()));
                 }
@@ -1381,6 +1745,7 @@ impl DiscWriter for DiscWriterWIA {
                 Ok(())
             },
         )?;
+        debug!("Saved {} bytes with group data reuse", reuse_size);
 
         // Collect hash results
         let digest_results = digest.finish();

@@ -28,6 +28,11 @@ pub fn sha1_hash(buf: &[u8]) -> HashBytes {
     }
 }
 
+/// Hashes a byte slice with XXH64.
+#[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
+#[instrument(skip_all)]
+pub fn xxh64_hash(buf: &[u8]) -> u64 { xxhash_rust::xxh64::xxh64(buf, 0) }
+
 pub type DigestThread = (Sender<Bytes>, JoinHandle<DigestResult>);
 
 pub fn digest_thread<H>() -> DigestThread

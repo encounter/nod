@@ -253,6 +253,7 @@ pub(crate) fn check_block(
         if sector_data_iter(block).enumerate().all(|(i, sector_data)| {
             let sector_offset = partition_offset + i as u64 * SECTOR_DATA_SIZE as u64;
             lfg.check_sector_chunked(sector_data, disc_id, disc_num, sector_offset)
+                == sector_data.len()
         }) {
             return Ok(CheckBlockResult::Junk);
         }
@@ -260,7 +261,7 @@ pub(crate) fn check_block(
         if buf.iter().all(|&b| b == 0) {
             return Ok(CheckBlockResult::Zeroed);
         }
-        if lfg.check_sector_chunked(buf, disc_id, disc_num, input_position) {
+        if lfg.check_sector_chunked(buf, disc_id, disc_num, input_position) == buf.len() {
             return Ok(CheckBlockResult::Junk);
         }
     }

@@ -260,7 +260,7 @@ pub const DOL_MAX_TEXT_SECTIONS: usize = 7;
 pub const DOL_MAX_DATA_SECTIONS: usize = 11;
 
 /// Dolphin executable (DOL) header.
-#[derive(Debug, Clone, FromBytes, Immutable, KnownLayout)]
+#[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
 pub struct DolHeader {
     /// Text section offsets
     pub text_offs: [U32; DOL_MAX_TEXT_SECTIONS],

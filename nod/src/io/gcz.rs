@@ -324,19 +324,15 @@ impl DiscWriter for DiscWriterGCZ {
             options.processor_threads,
             |block| {
                 // Update hashers
-                let disc_data_len = block.disc_data.len() as u64;
+                input_position += block.disc_data.len() as u64;
                 digest.send(block.disc_data);
 
                 // Update block map and hash
-                if block.meta.is_compressed {
-                    block_map[block.block_idx as usize] = data_position.into();
-                } else {
-                    block_map[block.block_idx as usize] = (data_position | (1 << 63)).into();
-                }
+                let uncompressed_bit = (!block.meta.is_compressed as u64) << 63;
+                block_map[block.block_idx as usize] = (data_position | uncompressed_bit).into();
                 block_hashes[block.block_idx as usize] = block.meta.block_hash.into();
 
                 // Write block data
-                input_position += disc_data_len;
                 data_position += block.block_data.len() as u64;
                 data_callback(block.block_data, input_position, disc_size)
                     .with_context(|| format!("Failed to write block {}", block.block_idx))?;

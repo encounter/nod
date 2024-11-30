@@ -2,8 +2,12 @@
 
 use std::{borrow::Cow, fmt, str::FromStr, sync::Arc};
 
+use zerocopy::FromBytes;
+
 use crate::{
-    disc::{wii::WiiPartitionHeader, DiscHeader, PartitionHeader, SECTOR_SIZE},
+    disc::{
+        fst::Fst, wii::WiiPartitionHeader, DiscHeader, PartitionHeader, BOOT_SIZE, SECTOR_SIZE,
+    },
     Error, Result,
 };
 
@@ -300,14 +304,14 @@ pub struct PartitionInfo {
     pub key: KeyBytes,
     /// The Wii partition header.
     pub header: Arc<WiiPartitionHeader>,
-    /// The disc header within the partition.
-    pub disc_header: Arc<DiscHeader>,
-    /// The partition header within the partition.
-    pub partition_header: Arc<PartitionHeader>,
     /// Whether the partition data is encrypted
     pub has_encryption: bool,
     /// Whether the partition data hashes are present
     pub has_hashes: bool,
+    /// Disc and partition header (boot.bin)
+    pub raw_boot: Arc<[u8; BOOT_SIZE]>,
+    /// File system table (fst.bin), or `None` if partition is invalid
+    pub raw_fst: Option<Arc<[u8]>>,
 }
 
 impl PartitionInfo {
@@ -321,5 +325,26 @@ impl PartitionInfo {
     #[inline]
     pub fn data_contains_sector(&self, sector: u32) -> bool {
         sector >= self.data_start_sector && sector < self.data_end_sector
+    }
+
+    /// A view into the disc header.
+    #[inline]
+    pub fn disc_header(&self) -> &DiscHeader {
+        DiscHeader::ref_from_bytes(&self.raw_boot[..size_of::<DiscHeader>()])
+            .expect("Invalid disc header alignment")
+    }
+
+    /// A view into the partition header.
+    #[inline]
+    pub fn partition_header(&self) -> &PartitionHeader {
+        PartitionHeader::ref_from_bytes(&self.raw_boot[size_of::<DiscHeader>()..])
+            .expect("Invalid partition header alignment")
+    }
+
+    /// A view into the file system table (FST).
+    #[inline]
+    pub fn fst(&self) -> Option<Fst> {
+        // FST has already been parsed, so we can safely unwrap
+        Some(Fst::new(self.raw_fst.as_deref()?).unwrap())
     }
 }

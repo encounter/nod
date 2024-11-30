@@ -6,7 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use tracing::warn;
-use zerocopy::IntoBytes;
+use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
     common::{PartitionInfo, PartitionKind},
@@ -21,7 +21,8 @@ use crate::{
             PartitionReaderWii, WiiPartEntry, WiiPartGroup, WiiPartitionHeader, REGION_OFFSET,
             REGION_SIZE, WII_PART_GROUP_OFF,
         },
-        DiscHeader, DL_DVD_SIZE, MINI_DVD_SIZE, SECTOR_GROUP_SIZE, SECTOR_SIZE, SL_DVD_SIZE,
+        DiscHeader, PartitionHeader, BOOT_SIZE, DL_DVD_SIZE, MINI_DVD_SIZE, SECTOR_GROUP_SIZE,
+        SECTOR_SIZE, SL_DVD_SIZE,
     },
     io::block::BlockReader,
     read::{DiscMeta, DiscOptions, PartitionEncryption, PartitionOptions, PartitionReader},
@@ -38,12 +39,22 @@ pub struct DiscReader {
     pos: u64,
     size: u64,
     mode: PartitionEncryption,
-    disc_header: Arc<DiscHeader>,
-    partitions: Arc<[PartitionInfo]>,
-    region: Option<[u8; REGION_SIZE]>,
-    sector_group: Option<SectorGroup>,
+    raw_boot: Arc<[u8; BOOT_SIZE]>,
     alt_disc_header: Option<Arc<DiscHeader>>,
-    alt_partitions: Option<Arc<[PartitionInfo]>>,
+    disc_data: DiscReaderData,
+    sector_group: Option<SectorGroup>,
+}
+
+#[derive(Clone)]
+enum DiscReaderData {
+    GameCube {
+        raw_fst: Option<Arc<[u8]>>,
+    },
+    Wii {
+        partitions: Arc<[PartitionInfo]>,
+        alt_partitions: Option<Arc<[PartitionInfo]>>,
+        region: [u8; REGION_SIZE],
+    },
 }
 
 impl Clone for DiscReader {
@@ -54,12 +65,10 @@ impl Clone for DiscReader {
             pos: 0,
             size: self.size,
             mode: self.mode,
-            disc_header: self.disc_header.clone(),
-            partitions: self.partitions.clone(),
-            region: self.region,
-            sector_group: None,
+            raw_boot: self.raw_boot.clone(),
             alt_disc_header: self.alt_disc_header.clone(),
-            alt_partitions: self.alt_partitions.clone(),
+            disc_data: self.disc_data.clone(),
+            sector_group: None,
         }
     }
 }
@@ -68,12 +77,14 @@ impl DiscReader {
     pub fn new(inner: Box<dyn BlockReader>, options: &DiscOptions) -> Result<Self> {
         let mut reader = DirectDiscReader::new(inner)?;
 
-        let disc_header: Arc<DiscHeader> = read_arc(&mut reader).context("Reading disc header")?;
+        let raw_boot: Arc<[u8; BOOT_SIZE]> =
+            read_arc(reader.as_mut()).context("Reading disc headers")?;
+        let disc_header = DiscHeader::ref_from_bytes(&raw_boot[..size_of::<DiscHeader>()])
+            .expect("Invalid disc header alignment");
+        let disc_header_arc = Arc::from(disc_header.clone());
+
         let mut alt_disc_header = None;
-        let mut region = None;
-        let mut partitions = Arc::<[PartitionInfo]>::default();
-        let mut alt_partitions = None;
-        if disc_header.is_wii() {
+        let disc_data = if disc_header.is_wii() {
             // Sanity check
             if disc_header.has_partition_encryption() && !disc_header.has_partition_hashes() {
                 return Err(Error::DiscFormat(
@@ -90,17 +101,22 @@ impl DiscReader {
 
             // Read region info
             reader.seek(SeekFrom::Start(REGION_OFFSET)).context("Seeking to region info")?;
-            region = Some(read_from(&mut reader).context("Reading region info")?);
+            let region: [u8; REGION_SIZE] =
+                read_from(&mut reader).context("Reading region info")?;
 
             // Read partition info
-            partitions = Arc::from(read_partition_info(&mut reader, disc_header.clone())?);
+            let partitions = Arc::<[PartitionInfo]>::from(read_partition_info(
+                &mut reader,
+                disc_header_arc.clone(),
+            )?);
+            let mut alt_partitions = None;
 
             // Update disc header with encryption mode
             if matches!(
                 options.partition_encryption,
                 PartitionEncryption::ForceDecrypted | PartitionEncryption::ForceEncrypted
             ) {
-                let mut disc_header = Box::new(disc_header.as_ref().clone());
+                let mut disc_header = Box::new(disc_header.clone());
                 let mut partitions = Box::<[PartitionInfo]>::from(partitions.as_ref());
                 disc_header.no_partition_encryption = match options.partition_encryption {
                     PartitionEncryption::ForceDecrypted => 1,
@@ -113,15 +129,23 @@ impl DiscReader {
                 alt_disc_header = Some(Arc::from(disc_header));
                 alt_partitions = Some(Arc::from(partitions));
             }
-        } else if !disc_header.is_gamecube() {
+
+            DiscReaderData::Wii { partitions, alt_partitions, region }
+        } else if disc_header.is_gamecube() {
+            DiscReaderData::GameCube { raw_fst: None }
+        } else {
             return Err(Error::DiscFormat("Invalid disc header".to_string()));
-        }
+        };
 
         // Calculate disc size
         let io = reader.into_inner();
-        let size = io.meta().disc_size.unwrap_or_else(|| guess_disc_size(&partitions));
+        let partitions = match &disc_data {
+            DiscReaderData::Wii { partitions, .. } => partitions,
+            _ => &Arc::default(),
+        };
+        let size = io.meta().disc_size.unwrap_or_else(|| guess_disc_size(partitions));
         let preloader = Preloader::new(
-            SectorGroupLoader::new(io.clone(), disc_header.clone(), partitions.clone()),
+            SectorGroupLoader::new(io.clone(), disc_header_arc, partitions.clone()),
             options.preloader_threads,
         );
         Ok(Self {
@@ -130,12 +154,10 @@ impl DiscReader {
             pos: 0,
             size,
             mode: options.partition_encryption,
-            disc_header,
-            partitions,
-            region,
+            raw_boot,
+            disc_data,
             sector_group: None,
             alt_disc_header,
-            alt_partitions,
         })
     }
 
@@ -150,15 +172,68 @@ impl DiscReader {
 
     #[inline]
     pub fn header(&self) -> &DiscHeader {
-        self.alt_disc_header.as_ref().unwrap_or(&self.disc_header)
+        self.alt_disc_header.as_deref().unwrap_or_else(|| {
+            DiscHeader::ref_from_bytes(&self.raw_boot[..size_of::<DiscHeader>()])
+                .expect("Invalid disc header alignment")
+        })
+    }
+
+    // #[inline]
+    // pub fn orig_header(&self) -> &DiscHeader {
+    //     DiscHeader::ref_from_bytes(&self.raw_boot[..size_of::<DiscHeader>()])
+    //         .expect("Invalid disc header alignment")
+    // }
+
+    #[inline]
+    pub fn region(&self) -> Option<&[u8; REGION_SIZE]> {
+        match &self.disc_data {
+            DiscReaderData::Wii { region, .. } => Some(region),
+            _ => None,
+        }
     }
 
     #[inline]
-    pub fn region(&self) -> Option<&[u8; REGION_SIZE]> { self.region.as_ref() }
+    pub fn partitions(&self) -> &[PartitionInfo] {
+        match &self.disc_data {
+            DiscReaderData::Wii { partitions, alt_partitions, .. } => {
+                alt_partitions.as_deref().unwrap_or(partitions)
+            }
+            _ => &[],
+        }
+    }
 
     #[inline]
-    pub fn partitions(&self) -> &[PartitionInfo] {
-        self.alt_partitions.as_deref().unwrap_or(&self.partitions)
+    pub fn orig_partitions(&self) -> &[PartitionInfo] {
+        match &self.disc_data {
+            DiscReaderData::Wii { partitions, .. } => partitions,
+            _ => &[],
+        }
+    }
+
+    #[inline]
+    pub fn partition_header(&self) -> Option<&PartitionHeader> {
+        match &self.disc_data {
+            DiscReaderData::GameCube { .. } => Some(
+                PartitionHeader::ref_from_bytes(
+                    &self.raw_boot[size_of::<DiscHeader>()
+                        ..size_of::<DiscHeader>() + size_of::<PartitionHeader>()],
+                )
+                .expect("Invalid partition header alignment"),
+            ),
+            _ => None,
+        }
+    }
+
+    /// A reference to the raw FST for GameCube discs.
+    /// For Wii discs, use the FST from the appropriate [PartitionInfo].
+    #[inline]
+    pub fn fst(&self) -> Option<Fst> {
+        match &self.disc_data {
+            DiscReaderData::GameCube { raw_fst } => {
+                raw_fst.as_deref().and_then(|v| Fst::new(v).ok())
+            }
+            _ => None,
+        }
     }
 
     #[inline]
@@ -170,20 +245,30 @@ impl DiscReader {
         index: usize,
         options: &PartitionOptions,
     ) -> Result<Box<dyn PartitionReader>> {
-        if self.disc_header.is_gamecube() {
-            if index == 0 {
-                Ok(PartitionReaderGC::new(
-                    self.io.clone(),
-                    self.preloader.clone(),
-                    self.disc_size(),
-                )?)
-            } else {
-                Err(Error::DiscFormat("GameCube discs only have one partition".to_string()))
+        match &self.disc_data {
+            DiscReaderData::GameCube { .. } => {
+                if index == 0 {
+                    Ok(PartitionReaderGC::new(
+                        self.io.clone(),
+                        self.preloader.clone(),
+                        self.disc_size(),
+                    )?)
+                } else {
+                    Err(Error::DiscFormat("GameCube discs only have one partition".to_string()))
+                }
             }
-        } else if let Some(part) = self.partitions.get(index) {
-            Ok(PartitionReaderWii::new(self.io.clone(), self.preloader.clone(), part, options)?)
-        } else {
-            Err(Error::DiscFormat(format!("Partition {index} not found")))
+            DiscReaderData::Wii { partitions, .. } => {
+                if let Some(part) = partitions.get(index) {
+                    Ok(PartitionReaderWii::new(
+                        self.io.clone(),
+                        self.preloader.clone(),
+                        part,
+                        options,
+                    )?)
+                } else {
+                    Err(Error::DiscFormat(format!("Partition {index} not found")))
+                }
+            }
         }
     }
 
@@ -194,20 +279,30 @@ impl DiscReader {
         kind: PartitionKind,
         options: &PartitionOptions,
     ) -> Result<Box<dyn PartitionReader>> {
-        if self.disc_header.is_gamecube() {
-            if kind == PartitionKind::Data {
-                Ok(PartitionReaderGC::new(
-                    self.io.clone(),
-                    self.preloader.clone(),
-                    self.disc_size(),
-                )?)
-            } else {
-                Err(Error::DiscFormat("GameCube discs only have a data partition".to_string()))
+        match &self.disc_data {
+            DiscReaderData::GameCube { .. } => {
+                if kind == PartitionKind::Data {
+                    Ok(PartitionReaderGC::new(
+                        self.io.clone(),
+                        self.preloader.clone(),
+                        self.disc_size(),
+                    )?)
+                } else {
+                    Err(Error::DiscFormat("GameCube discs only have a data partition".to_string()))
+                }
             }
-        } else if let Some(part) = self.partitions.iter().find(|v| v.kind == kind) {
-            Ok(PartitionReaderWii::new(self.io.clone(), self.preloader.clone(), part, options)?)
-        } else {
-            Err(Error::DiscFormat(format!("Partition type {kind} not found")))
+            DiscReaderData::Wii { partitions, .. } => {
+                if let Some(part) = partitions.iter().find(|v| v.kind == kind) {
+                    Ok(PartitionReaderWii::new(
+                        self.io.clone(),
+                        self.preloader.clone(),
+                        part,
+                        options,
+                    )?)
+                } else {
+                    Err(Error::DiscFormat(format!("Partition type {kind} not found")))
+                }
+            }
         }
     }
 
@@ -228,7 +323,7 @@ impl DiscReader {
         // Build sector group request
         let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
         let (request, abs_group_sector, max_groups) = if let Some(partition) =
-            self.partitions.iter().find(|part| part.data_contains_sector(abs_sector))
+            self.orig_partitions().iter().find(|part| part.data_contains_sector(abs_sector))
         {
             let group_idx = (abs_sector - partition.data_start_sector) / 64;
             let abs_group_sector = partition.data_start_sector + group_idx * 64;
@@ -283,7 +378,7 @@ impl BufRead for DiscReader {
         // Build sector group request
         let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
         let (request, abs_group_sector, max_groups) = if let Some(partition) =
-            self.partitions.iter().find(|part| part.data_contains_sector(abs_sector))
+            self.orig_partitions().iter().find(|part| part.data_contains_sector(abs_sector))
         {
             let group_idx = (abs_sector - partition.data_start_sector) / 64;
             let abs_group_sector = partition.data_start_sector + group_idx * 64;
@@ -395,11 +490,16 @@ fn read_partition_info(
                 data_start_sector,
                 key,
             });
-            let partition_disc_header: Arc<DiscHeader> =
-                read_arc(reader).context("Reading partition disc header")?;
-            let partition_header = read_arc(reader).context("Reading partition header")?;
-            if partition_disc_header.is_wii() {
-                let raw_fst = read_fst(reader, &partition_header, true)?;
+            let raw_boot: Arc<[u8; BOOT_SIZE]> =
+                read_arc(reader).context("Reading partition headers")?;
+            let partition_disc_header =
+                DiscHeader::ref_from_bytes(&raw_boot[..size_of::<DiscHeader>()])
+                    .expect("Invalid disc header alignment");
+            let partition_header =
+                PartitionHeader::ref_from_bytes(&raw_boot[size_of::<DiscHeader>()..])
+                    .expect("Invalid partition header alignment");
+            let raw_fst = if partition_disc_header.is_wii() {
+                let raw_fst = read_fst(reader, partition_header, true)?;
                 let fst = Fst::new(&raw_fst)?;
                 let max_fst_offset = fst
                     .nodes
@@ -420,9 +520,11 @@ fn read_partition_info(
                         )));
                     }
                 }
+                Some(raw_fst)
             } else {
                 warn!("Partition {group_idx}:{part_idx} is not valid");
-            }
+                None
+            };
             reader.reset(DirectDiscReaderMode::Raw);
 
             part_info.push(PartitionInfo {
@@ -433,10 +535,10 @@ fn read_partition_info(
                 data_end_sector,
                 key,
                 header,
-                disc_header: partition_disc_header,
-                partition_header,
                 has_encryption: disc_header.has_partition_encryption(),
                 has_hashes: disc_header.has_partition_hashes(),
+                raw_boot,
+                raw_fst,
             });
         }
     }

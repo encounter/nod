@@ -673,7 +673,7 @@ fn check_junk_data(
             .fill_buf()
             .with_context(|| format!("Failed to read disc file at offset {}", offset))?;
         let read_len = (file_buf.len() as u64).min(remaining) as usize;
-        if !lfg.check_sector_chunked(&file_buf[..read_len], junk_id, disc_num, pos) {
+        if lfg.check_sector_chunked(&file_buf[..read_len], junk_id, disc_num, pos) != read_len {
             return Ok(false);
         }
 

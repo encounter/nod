@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use zerocopy::FromBytes;
+use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 use crate::{
     disc::{
@@ -17,7 +17,7 @@ use crate::{
     read::{PartitionEncryption, PartitionMeta, PartitionReader},
     util::{
         impl_read_for_bufread,
-        read::{read_arc, read_arc_slice, read_vec},
+        read::{read_arc, read_arc_slice, read_from},
     },
     Result, ResultContext,
 };
@@ -138,17 +138,16 @@ pub(crate) fn read_dol(
     reader
         .seek(SeekFrom::Start(partition_header.dol_offset(is_wii)))
         .context("Seeking to DOL offset")?;
-    let mut raw_dol: Vec<u8> =
-        read_vec(reader, size_of::<DolHeader>()).context("Reading DOL header")?;
-    let dol_header = DolHeader::ref_from_bytes(raw_dol.as_slice()).unwrap();
+    let dol_header: DolHeader = read_from(reader).context("Reading DOL header")?;
     let dol_size = (dol_header.text_offs.iter().zip(&dol_header.text_sizes))
         .chain(dol_header.data_offs.iter().zip(&dol_header.data_sizes))
         .map(|(offs, size)| offs.get() + size.get())
         .max()
         .unwrap_or(size_of::<DolHeader>() as u32);
-    raw_dol.resize(dol_size as usize, 0);
+    let mut raw_dol = <[u8]>::new_box_zeroed_with_elems(dol_size as usize)?;
+    raw_dol[..size_of::<DolHeader>()].copy_from_slice(dol_header.as_bytes());
     reader.read_exact(&mut raw_dol[size_of::<DolHeader>()..]).context("Reading DOL")?;
-    Ok(Arc::from(raw_dol.as_slice()))
+    Ok(Arc::from(raw_dol))
 }
 
 pub(crate) fn read_fst<R>(
@@ -173,6 +172,24 @@ where
     Ok(raw_fst)
 }
 
+pub(crate) fn read_apploader<R>(reader: &mut R) -> Result<Arc<[u8]>>
+where R: Read + Seek + ?Sized {
+    reader
+        .seek(SeekFrom::Start(BOOT_SIZE as u64 + BI2_SIZE as u64))
+        .context("Seeking to apploader offset")?;
+    let apploader_header: ApploaderHeader =
+        read_from(reader).context("Reading apploader header")?;
+    let apploader_size = size_of::<ApploaderHeader>()
+        + apploader_header.size.get() as usize
+        + apploader_header.trailer_size.get() as usize;
+    let mut raw_apploader = <[u8]>::new_box_zeroed_with_elems(apploader_size)?;
+    raw_apploader[..size_of::<ApploaderHeader>()].copy_from_slice(apploader_header.as_bytes());
+    reader
+        .read_exact(&mut raw_apploader[size_of::<ApploaderHeader>()..])
+        .context("Reading apploader")?;
+    Ok(Arc::from(raw_apploader))
+}
+
 pub(crate) fn read_part_meta(
     reader: &mut dyn PartitionReader,
     is_wii: bool,
@@ -186,17 +203,7 @@ pub(crate) fn read_part_meta(
     let raw_bi2: Arc<[u8; BI2_SIZE]> = read_arc(reader).context("Reading bi2.bin")?;
 
     // apploader.bin
-    let mut raw_apploader: Vec<u8> =
-        read_vec(reader, size_of::<ApploaderHeader>()).context("Reading apploader header")?;
-    let apploader_header = ApploaderHeader::ref_from_bytes(raw_apploader.as_slice()).unwrap();
-    let apploader_size = size_of::<ApploaderHeader>()
-        + apploader_header.size.get() as usize
-        + apploader_header.trailer_size.get() as usize;
-    raw_apploader.resize(apploader_size, 0);
-    reader
-        .read_exact(&mut raw_apploader[size_of::<ApploaderHeader>()..])
-        .context("Reading apploader")?;
-    let raw_apploader = Arc::from(raw_apploader.as_slice());
+    let raw_apploader = read_apploader(reader)?;
 
     // fst.bin
     let raw_fst = read_fst(reader, partition_header, is_wii)?;
