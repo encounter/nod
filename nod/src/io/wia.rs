@@ -1517,6 +1517,7 @@ impl DiscWriterWIA {
 
         let mut partitions = <[WIAPartition]>::new_box_zeroed_with_elems(num_partitions as usize)?;
         let mut raw_data = <[WIARawData]>::new_box_zeroed_with_elems(num_raw_data as usize)?;
+        raw_data[0].raw_data_offset = (DISC_HEAD_SIZE as u64).into();
 
         let mut raw_data_idx = 0;
         let mut group_idx = 0;

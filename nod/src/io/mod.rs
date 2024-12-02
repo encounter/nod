@@ -5,7 +5,6 @@ pub(crate) mod ciso;
 #[cfg(feature = "compress-zlib")]
 pub(crate) mod gcz;
 pub(crate) mod iso;
-pub(crate) mod mapped;
 pub(crate) mod nfs;
 pub(crate) mod nkit;
 pub(crate) mod split;
