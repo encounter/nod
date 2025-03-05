@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::{Display, Formatter},
     io,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
@@ -19,7 +20,9 @@ use zerocopy::FromZeros;
 use crate::{
     common::PartitionInfo,
     disc::{
-        hashes::hash_sector_group, wii::HASHES_SIZE, DiscHeader, SECTOR_GROUP_SIZE, SECTOR_SIZE,
+        hashes::{hash_sector_group, GroupHashes},
+        wii::HASHES_SIZE,
+        DiscHeader, SECTOR_GROUP_SIZE, SECTOR_SIZE,
     },
     io::{
         block::{Block, BlockKind, BlockReader},
@@ -30,6 +33,7 @@ use crate::{
         aes::{decrypt_sector, encrypt_sector},
         array_ref_mut,
     },
+    IoResultContext,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,14 +41,27 @@ pub struct SectorGroupRequest {
     pub group_idx: u32,
     pub partition_idx: Option<u8>,
     pub mode: PartitionEncryption,
+    pub force_rehash: bool,
+}
+
+impl Display for SectorGroupRequest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.partition_idx {
+            Some(idx) => write!(f, "Partition {} group {}", idx, self.group_idx),
+            None => write!(f, "Group {}", self.group_idx),
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct SectorGroup {
     pub request: SectorGroupRequest,
+    pub start_sector: u32,
     pub data: Bytes,
     pub sector_bitmap: u64,
     pub io_duration: Option<Duration>,
+    #[allow(unused)] // TODO WIA hash exceptions
+    pub group_hashes: Option<Arc<GroupHashes>>,
 }
 
 impl SectorGroup {
@@ -208,9 +225,12 @@ fn preloader_thread(
                 let end = Instant::now();
                 last_request_end = Some(end);
                 let req_time = end - start;
-                stat_tx
+                if stat_tx
                     .send(PreloaderThreadStats { thread_id, wait_time, req_time, io_time })
-                    .expect("Failed to send preloader stats");
+                    .is_err()
+                {
+                    break;
+                }
             }
         })
         .expect("Failed to spawn preloader thread")
@@ -329,6 +349,18 @@ impl Clone for SectorGroupLoader {
     }
 }
 
+#[derive(Default)]
+struct LoadedSectorGroup {
+    /// Start sector of the group
+    start_sector: u32,
+    /// Bitmap of sectors that were read
+    sector_bitmap: u64,
+    /// Total duration of I/O operations
+    io_duration: Option<Duration>,
+    /// Calculated sector group hashes
+    group_hashes: Option<Arc<GroupHashes>>,
+}
+
 impl SectorGroupLoader {
     pub fn new(
         io: Box<dyn BlockReader>,
@@ -344,13 +376,21 @@ impl SectorGroupLoader {
         let mut sector_group_buf = BytesMut::zeroed(SECTOR_GROUP_SIZE);
 
         let out = array_ref_mut![sector_group_buf, 0, SECTOR_GROUP_SIZE];
-        let (sector_bitmap, io_duration) = if request.partition_idx.is_some() {
-            self.load_partition_group(request, out)?
-        } else {
-            self.load_raw_group(request, out)?
-        };
+        let LoadedSectorGroup { start_sector, sector_bitmap, io_duration, group_hashes } =
+            if request.partition_idx.is_some() {
+                self.load_partition_group(request, out)?
+            } else {
+                self.load_raw_group(request, out)?
+            };
 
-        Ok(SectorGroup { request, data: sector_group_buf.freeze(), sector_bitmap, io_duration })
+        Ok(SectorGroup {
+            request,
+            start_sector,
+            data: sector_group_buf.freeze(),
+            sector_bitmap,
+            io_duration,
+            group_hashes,
+        })
     }
 
     /// Load a sector group from a partition.
@@ -360,16 +400,16 @@ impl SectorGroupLoader {
         &mut self,
         request: SectorGroupRequest,
         sector_group_buf: &mut [u8; SECTOR_GROUP_SIZE],
-    ) -> io::Result<(u64, Option<Duration>)> {
+    ) -> io::Result<LoadedSectorGroup> {
         let Some(partition) =
             request.partition_idx.and_then(|idx| self.partitions.get(idx as usize))
         else {
-            return Ok((0, None));
+            return Ok(LoadedSectorGroup::default());
         };
 
         let abs_group_sector = partition.data_start_sector + request.group_idx * 64;
         if abs_group_sector >= partition.data_end_sector {
-            return Ok((0, None));
+            return Ok(LoadedSectorGroup::default());
         }
 
         // Bitmap of sectors that were read
@@ -382,6 +422,8 @@ impl SectorGroupLoader {
         let mut hash_exceptions = Vec::<WIAException>::new();
         // Total duration of I/O operations
         let mut io_duration = None;
+        // Calculated sector group hashes
+        let mut group_hashes = None;
 
         // Read sector group
         for sector in 0..64 {
@@ -397,7 +439,10 @@ impl SectorGroupLoader {
 
             // Read new block
             if !self.block.contains(abs_sector) {
-                self.block = self.io.read_block(self.block_buf.as_mut(), abs_sector)?;
+                self.block = self
+                    .io
+                    .read_block(self.block_buf.as_mut(), abs_sector)
+                    .io_with_context(|| format!("Reading block for sector {abs_sector}"))?;
                 if let Some(duration) = self.block.io_duration {
                     *io_duration.get_or_insert_with(Duration::default) += duration;
                 }
@@ -408,16 +453,21 @@ impl SectorGroupLoader {
             }
 
             // Add hash exceptions
-            self.block.append_hash_exceptions(abs_sector, sector, &mut hash_exceptions)?;
+            self.block
+                .append_hash_exceptions(abs_sector, sector, &mut hash_exceptions)
+                .io_with_context(|| format!("Appending hash exceptions for sector {abs_sector}"))?;
 
             // Read new sector into buffer
-            let (encrypted, has_hashes) = self.block.copy_sector(
-                sector_data,
-                self.block_buf.as_mut(),
-                abs_sector,
-                partition.disc_header(),
-                Some(partition),
-            )?;
+            let (encrypted, has_hashes) = self
+                .block
+                .copy_sector(
+                    sector_data,
+                    self.block_buf.as_mut(),
+                    abs_sector,
+                    partition.disc_header(),
+                    Some(partition),
+                )
+                .io_with_context(|| format!("Copying sector {abs_sector} from block"))?;
             if !encrypted {
                 decrypted_sectors |= 1 << sector;
             }
@@ -428,7 +478,9 @@ impl SectorGroupLoader {
         }
 
         // Recover hashes
-        if request.mode != PartitionEncryption::ForceDecryptedNoHashes && hash_recovery_sectors != 0
+        if request.force_rehash
+            || (request.mode != PartitionEncryption::ForceDecryptedNoHashes
+                && hash_recovery_sectors != 0)
         {
             // Decrypt any encrypted sectors
             if decrypted_sectors != u64::MAX {
@@ -443,16 +495,19 @@ impl SectorGroupLoader {
             }
 
             // Recover hashes
-            let group_hashes = hash_sector_group(sector_group_buf);
+            let hashes = hash_sector_group(sector_group_buf, request.force_rehash);
 
             // Apply hashes
             for sector in 0..64 {
                 let sector_data =
                     array_ref_mut![sector_group_buf, sector * SECTOR_SIZE, SECTOR_SIZE];
                 if (hash_recovery_sectors >> sector) & 1 == 1 {
-                    group_hashes.apply(sector_data, sector);
+                    hashes.apply(sector_data, sector);
                 }
             }
+
+            // Persist hashes
+            group_hashes = Some(Arc::from(hashes));
         }
 
         // Apply hash exceptions
@@ -508,7 +563,12 @@ impl SectorGroupLoader {
             }
         }
 
-        Ok((sector_bitmap, io_duration))
+        Ok(LoadedSectorGroup {
+            start_sector: abs_group_sector,
+            sector_bitmap,
+            io_duration,
+            group_hashes,
+        })
     }
 
     /// Loads a non-partition sector group.
@@ -516,7 +576,7 @@ impl SectorGroupLoader {
         &mut self,
         request: SectorGroupRequest,
         sector_group_buf: &mut [u8; SECTOR_GROUP_SIZE],
-    ) -> io::Result<(u64, Option<Duration>)> {
+    ) -> io::Result<LoadedSectorGroup> {
         let abs_group_sector = request.group_idx * 64;
 
         // Bitmap of sectors that were read
@@ -534,7 +594,10 @@ impl SectorGroupLoader {
 
             // Read new block
             if !self.block.contains(abs_sector) {
-                self.block = self.io.read_block(self.block_buf.as_mut(), abs_sector)?;
+                self.block = self
+                    .io
+                    .read_block(self.block_buf.as_mut(), abs_sector)
+                    .io_with_context(|| format!("Reading block for sector {abs_sector}"))?;
                 if let Some(duration) = self.block.io_duration {
                     *io_duration.get_or_insert_with(Duration::default) += duration;
                 }
@@ -544,17 +607,24 @@ impl SectorGroupLoader {
             }
 
             // Read new sector into buffer
-            self.block.copy_sector(
-                sector_data,
-                self.block_buf.as_mut(),
-                abs_sector,
-                self.disc_header.as_ref(),
-                None,
-            )?;
+            self.block
+                .copy_sector(
+                    sector_data,
+                    self.block_buf.as_mut(),
+                    abs_sector,
+                    self.disc_header.as_ref(),
+                    None,
+                )
+                .io_with_context(|| format!("Copying sector {abs_sector} from block"))?;
             sector_bitmap |= 1 << sector;
         }
 
-        Ok((sector_bitmap, io_duration))
+        Ok(LoadedSectorGroup {
+            start_sector: abs_group_sector,
+            sector_bitmap,
+            io_duration,
+            group_hashes: None,
+        })
     }
 }
 

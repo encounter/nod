@@ -5,7 +5,7 @@
 		<name>Non-Redump - Nintendo - Nintendo GameCube</name>
 		<description>Non-Redump - Nintendo - Nintendo GameCube</description>
 		<subset>Non-Redump</subset>
-		<version>20240602-041318</version>
+		<version>20240904-155318</version>
 		<author>bikerspade, Gefflon, Hiccup, NovaAurora, rarenight, relax, Seventy7, togemet2</author>
 		<homepage>No-Intro</homepage>
 		<url>https://www.no-intro.org</url>
@@ -93,12 +93,6 @@
 	<game name="Major League Baseball 2K6 (USA) (Beta) (2006-05-18)" id="0012">
 		<description>Major League Baseball 2K6 (USA) (Beta) (2006-05-18)</description>
 		<rom name="Major League Baseball 2K6 (USA) (Beta) (2006-05-18).iso" size="1459978240" crc="2e97a802" md5="707168f95134d4847278472b84c7657b" sha1="d18ee85aeb558bb7d357bd0fc2a6c6a4bda2467c" serial="G62ET2"/>
-	</game>
-	<game name="Mega Man X - Command Mission (USA) (Beta)" id="0038">
-		<category>Games</category>
-		<category>Preproduction</category>
-		<description>Mega Man X - Command Mission (USA) (Beta)</description>
-		<rom name="Mega Man X - Command Mission (USA) (Beta).iso" size="1459978240" crc="7b88690e" md5="801aeb70186915ac0a53494006ff74f8" sha1="24d72340954cd62e142a6d11a6582fc5f40ba994" sha256="de74aab25978ee3523e7de522d9da9e7f65690eb161094163d342c423d55d25c" serial="GXRE08"/>
 	</game>
 	<game name="Metal Gear Solid - The Twin Snakes (USA) (Disc 2) (Beta)" id="0014">
 		<description>Metal Gear Solid - The Twin Snakes (USA) (Disc 2) (Beta)</description>

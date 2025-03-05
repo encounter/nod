@@ -27,10 +27,13 @@ pub const WII_MAGIC: MagicBytes = [0x5D, 0x1C, 0x9E, 0xA3];
 /// Magic bytes for GameCube discs. Located at offset 0x1C.
 pub const GCN_MAGIC: MagicBytes = [0xC2, 0x33, 0x9F, 0x3D];
 
-/// Size in bytes of the disc header and partition header. (boot.bin)
-pub const BOOT_SIZE: usize = size_of::<DiscHeader>() + size_of::<PartitionHeader>();
+/// Offset in bytes of the boot block within a disc partition.
+pub const BB2_OFFSET: usize = 0x420;
 
-/// Size in bytes of the debug and region information. (bi2.bin)
+/// Size in bytes of the disc header, debug block and boot block. (boot.bin)
+pub const BOOT_SIZE: usize = 0x440;
+
+/// Size in bytes of the DVD Boot Info (debug and region information, bi2.bin)
 pub const BI2_SIZE: usize = 0x2000;
 
 /// The size of a single-layer MiniDVD. (1.4 GB)
@@ -114,20 +117,28 @@ impl DiscHeader {
     pub fn has_partition_encryption(&self) -> bool { self.no_partition_encryption == 0 }
 }
 
-/// A header describing the contents of a disc partition.
+/// The debug block of a disc partition.
 ///
-/// **GameCube**: Always follows the disc header.
-///
-/// **Wii**: Follows the disc header within each partition.
+/// Located at offset 0x400 (following the disc header) within each partition.
 #[derive(Clone, Debug, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C, align(4))]
-pub struct PartitionHeader {
+pub struct DebugHeader {
     /// Debug monitor offset
     pub debug_mon_offset: U32,
     /// Debug monitor load address
     pub debug_load_address: U32,
     /// Padding
     _pad1: [u8; 0x18],
+}
+
+static_assert!(size_of::<DebugHeader>() == 0x20);
+
+/// The boot block (BB2) of a disc partition.
+///
+/// Located at offset 0x420 (following the debug block) within each partition.
+#[derive(Clone, Debug, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
+#[repr(C, align(4))]
+pub struct BootHeader {
     /// Offset to main DOL (Wii: >> 2)
     pub dol_offset: U32,
     /// Offset to file system table (Wii: >> 2)
@@ -146,9 +157,12 @@ pub struct PartitionHeader {
     _pad2: [u8; 4],
 }
 
-static_assert!(size_of::<PartitionHeader>() == 0x40);
+static_assert!(size_of::<BootHeader>() == 0x20);
+static_assert!(
+    size_of::<DiscHeader>() + size_of::<DebugHeader>() + size_of::<BootHeader>() == BOOT_SIZE
+);
 
-impl PartitionHeader {
+impl BootHeader {
     /// Offset within the partition to the main DOL.
     #[inline]
     pub fn dol_offset(&self, is_wii: bool) -> u64 {

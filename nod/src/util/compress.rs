@@ -10,6 +10,7 @@ use crate::{
 
 pub struct Decompressor {
     pub kind: DecompressionKind,
+    #[allow(unused)] // if compression features are disabled
     pub cache: DecompressorCache,
 }
 
@@ -38,7 +39,13 @@ impl Decompressor {
     pub fn decompress(&mut self, buf: &[u8], out: &mut [u8]) -> io::Result<usize> {
         match &self.kind {
             DecompressionKind::None => {
-                out.copy_from_slice(buf);
+                if buf.len() > out.len() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Decompressed data too large: {} > {}", buf.len(), out.len()),
+                    ));
+                }
+                out[..buf.len()].copy_from_slice(buf);
                 Ok(buf.len())
             }
             #[cfg(feature = "compress-zlib")]
@@ -128,6 +135,18 @@ impl Decompressor {
                 };
                 ctx.decompress(out, buf).map_err(zstd_util::map_error_code)
             }
+        }
+    }
+
+    pub fn get_content_size(&self, buf: &[u8]) -> io::Result<Option<usize>> {
+        match &self.kind {
+            DecompressionKind::None => Ok(Some(buf.len())),
+            #[cfg(feature = "compress-zstd")]
+            DecompressionKind::Zstandard => zstd_safe::get_frame_content_size(buf)
+                .map(|n| n.map(|n| n as usize))
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+            #[allow(unreachable_patterns)] // if compression features are disabled
+            _ => Ok(None),
         }
     }
 }
@@ -227,6 +246,14 @@ impl Compressor {
     pub fn compress(&mut self, buf: &[u8]) -> io::Result<bool> {
         self.buffer.clear();
         match self.kind {
+            Compression::None => {
+                if self.buffer.capacity() >= buf.len() {
+                    self.buffer.extend_from_slice(buf);
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
             #[cfg(feature = "compress-zlib")]
             Compression::Deflate(level) => {
                 let compressor = match &mut self.cache {
@@ -288,6 +315,8 @@ impl Compressor {
                     _ => {
                         let mut ctx = zstd_safe::CCtx::create();
                         ctx.init(level as i32).map_err(zstd_util::map_error_code)?;
+                        ctx.set_parameter(zstd_safe::CParameter::ContentSizeFlag(true))
+                            .map_err(zstd_util::map_error_code)?;
                         self.cache = CompressorCache::Zstandard(ctx);
                         match &mut self.cache {
                             CompressorCache::Zstandard(compressor) => compressor,
@@ -302,6 +331,7 @@ impl Compressor {
                     Err(e) => Err(zstd_util::map_error_code(e)),
                 }
             }
+            #[allow(unreachable_patterns)] // if compression is disabled
             _ => Err(io::Error::new(
                 io::ErrorKind::Other,
                 format!("Unsupported compression: {:?}", self.kind),

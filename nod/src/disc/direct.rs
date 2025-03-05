@@ -14,6 +14,7 @@ use crate::{
     Result,
 };
 
+#[derive(Clone)]
 pub enum DirectDiscReaderMode {
     Raw,
     Partition { disc_header: Arc<DiscHeader>, data_start_sector: u32, key: KeyBytes },
@@ -29,6 +30,19 @@ pub struct DirectDiscReader {
     block_decrypted: bool,
     pos: u64,
     mode: DirectDiscReaderMode,
+}
+
+impl Clone for DirectDiscReader {
+    fn clone(&self) -> Self {
+        Self {
+            io: self.io.clone(),
+            block: Block::default(),
+            block_buf: <[u8]>::new_box_zeroed_with_elems(self.block_buf.len()).unwrap(),
+            block_decrypted: false,
+            pos: 0,
+            mode: self.mode.clone(),
+        }
+    }
 }
 
 impl DirectDiscReader {

@@ -127,18 +127,36 @@ where T: Div<Output = T> + Rem<Output = T> + Copy {
     (x / y, x % y)
 }
 
-#[inline]
-pub(crate) fn align_up_32(n: u32, align: u32) -> u32 { (n + align - 1) & !(align - 1) }
+pub(crate) trait Align {
+    fn align_up(self, align: Self) -> Self;
 
-#[inline]
-pub(crate) fn align_up_64(n: u64, align: u64) -> u64 { (n + align - 1) & !(align - 1) }
+    fn align_down(self, align: Self) -> Self;
+}
+
+macro_rules! impl_align {
+    ($ty:ident) => {
+        impl Align for $ty {
+            #[inline(always)]
+            fn align_up(self, align: Self) -> Self { (self + (align - 1)) & !(align - 1) }
+
+            #[inline(always)]
+            fn align_down(self, align: Self) -> Self { self & !(align - 1) }
+        }
+    };
+}
+
+impl_align!(u8);
+impl_align!(u16);
+impl_align!(u32);
+impl_align!(u64);
+impl_align!(usize);
 
 /// Creates a fixed-size array reference from a slice.
 macro_rules! array_ref {
     ($slice:expr, $offset:expr, $size:expr) => {{
         #[inline(always)]
         fn to_array<T>(slice: &[T]) -> &[T; $size] {
-            unsafe { &*(slice.as_ptr() as *const [_; $size]) }
+            unsafe { &*(slice as *const [T] as *const [T; $size]) }
         }
         to_array(&$slice[$offset..$offset + $size])
     }};
@@ -150,7 +168,7 @@ macro_rules! array_ref_mut {
     ($slice:expr, $offset:expr, $size:expr) => {{
         #[inline(always)]
         fn to_array<T>(slice: &mut [T]) -> &mut [T; $size] {
-            unsafe { &mut *(slice.as_ptr() as *mut [_; $size]) }
+            unsafe { &mut *(slice as *mut [T] as *mut [T; $size]) }
         }
         to_array(&mut $slice[$offset..$offset + $size])
     }};

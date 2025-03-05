@@ -3,9 +3,9 @@
 <datafile>
 	<header>
 		<name>Nintendo - GameCube</name>
-		<description>Nintendo - GameCube - Discs (1992) (2024-06-02 00-38-06)</description>
-		<version>2024-06-02 00-38-06</version>
-		<date>2024-06-02 00-38-06</date>
+		<description>Nintendo - GameCube - Discs (2001) (2024-12-01 23-54-46)</description>
+		<version>2024-12-01 23-54-46</version>
+		<date>2024-12-01 23-54-46</date>
 		<author>redump.org</author>
 		<homepage>redump.org</homepage>
 		<url>http://redump.org/</url>
@@ -2085,10 +2085,10 @@
 		<description>Nickelodeon Tak 2 - The Staff of Dreams (USA)</description>
 		<rom name="Nickelodeon Tak 2 - The Staff of Dreams (USA).iso" size="1459978240" crc="ca5ada0f" md5="0d9a7c74d1ff98dd5ad867bd67377bb1" sha1="bc36de899604771551b93638ce204da92e0b7582"/>
 	</game>
-	<game name="Nintendo GameCube Preview Disc - May 2003 (USA)">
+	<game name="Nintendo GameCube Preview Disc - May 2003 (USA, Canada)">
 		<category>Demos</category>
-		<description>Nintendo GameCube Preview Disc - May 2003 (USA)</description>
-		<rom name="Nintendo GameCube Preview Disc - May 2003 (USA).iso" size="1459978240" crc="d45c8c07" md5="73e092844193533bfd6d5c27034446a3" sha1="43047f599583e1b0357881d21cba2e3958c57822"/>
+		<description>Nintendo GameCube Preview Disc - May 2003 (USA, Canada)</description>
+		<rom name="Nintendo GameCube Preview Disc - May 2003 (USA, Canada).iso" size="1459978240" crc="d45c8c07" md5="73e092844193533bfd6d5c27034446a3" sha1="43047f599583e1b0357881d21cba2e3958c57822"/>
 	</game>
 	<game name="Interactive Multi-Game Demo Disc - July 2002 (USA)">
 		<category>Demos</category>
@@ -2395,10 +2395,10 @@
 		<description>Need for Speed - Underground (USA)</description>
 		<rom name="Need for Speed - Underground (USA).iso" size="1459978240" crc="01c154ba" md5="c20f02454166bc8fa08f84307871ac7d" sha1="d6882a712509e8bba75ee8837bcac65f8352b1d1"/>
 	</game>
-	<game name="Nickelodeon SpongeBob SquarePants - The Movie (USA) (Rev 1)">
+	<game name="Nickelodeon The SpongeBob SquarePants Movie (USA) (Rev 1)">
 		<category>Games</category>
-		<description>Nickelodeon SpongeBob SquarePants - The Movie (USA) (Rev 1)</description>
-		<rom name="Nickelodeon SpongeBob SquarePants - The Movie (USA) (Rev 1).iso" size="1459978240" crc="77be3cc6" md5="9fbad7186b2168190082a54fa20d63b7" sha1="2aea159b1e98a220a6e4534f0f017b8722ce4caa"/>
+		<description>Nickelodeon The SpongeBob SquarePants Movie (USA) (Rev 1)</description>
+		<rom name="Nickelodeon The SpongeBob SquarePants Movie (USA) (Rev 1).iso" size="1459978240" crc="77be3cc6" md5="9fbad7186b2168190082a54fa20d63b7" sha1="2aea159b1e98a220a6e4534f0f017b8722ce4caa"/>
 	</game>
 	<game name="Star Wars - Rogue Squadron III - Rebel Strike (USA) (En,Fr,De,Es,It)">
 		<category>Games</category>
@@ -2760,15 +2760,15 @@
 		<description>Sonic Adventure DX - Director's Cut (Europe) (En,Ja,Fr,De,Es) (Rev 1)</description>
 		<rom name="Sonic Adventure DX - Director's Cut (Europe) (En,Ja,Fr,De,Es) (Rev 1).iso" size="1459978240" crc="9ba7f3af" md5="2136ed4b6a27dc64066c8a689918dce0" sha1="99ce5f51388919a95d571a730c50362ba14277c3"/>
 	</game>
-	<game name="GoldenEye - Rogue Agent (France) (Disc 1)">
+	<game name="GoldenEye - Au Service du Mal (France) (Disc 1)">
 		<category>Games</category>
-		<description>GoldenEye - Rogue Agent (France) (Disc 1)</description>
-		<rom name="GoldenEye - Rogue Agent (France) (Disc 1).iso" size="1459978240" crc="4564bb01" md5="08110ba8ac059a8f735bf951bee12edd" sha1="107e792ae93495179f5bd657da166947751e37cc"/>
+		<description>GoldenEye - Au Service du Mal (France) (Disc 1)</description>
+		<rom name="GoldenEye - Au Service du Mal (France) (Disc 1).iso" size="1459978240" crc="4564bb01" md5="08110ba8ac059a8f735bf951bee12edd" sha1="107e792ae93495179f5bd657da166947751e37cc"/>
 	</game>
-	<game name="GoldenEye - Rogue Agent (France) (Disc 2)">
+	<game name="GoldenEye - Au Service du Mal (France) (Disc 2)">
 		<category>Games</category>
-		<description>GoldenEye - Rogue Agent (France) (Disc 2)</description>
-		<rom name="GoldenEye - Rogue Agent (France) (Disc 2).iso" size="1459978240" crc="dba8aa7f" md5="57f801c71548bd7a6e281b0b028a4ac6" sha1="7bb6875321b6ea90146bfb71bb730f6317c2a172"/>
+		<description>GoldenEye - Au Service du Mal (France) (Disc 2)</description>
+		<rom name="GoldenEye - Au Service du Mal (France) (Disc 2).iso" size="1459978240" crc="dba8aa7f" md5="57f801c71548bd7a6e281b0b028a4ac6" sha1="7bb6875321b6ea90146bfb71bb730f6317c2a172"/>
 	</game>
 	<game name="Lost Kingdoms (Europe) (En,Fr)">
 		<category>Games</category>
@@ -3265,10 +3265,10 @@
 		<description>Mega Man X - Command Mission (USA)</description>
 		<rom name="Mega Man X - Command Mission (USA).iso" size="1459978240" crc="82115bd2" md5="ddaf03e8bb5b7ca43ae2f2d77087f917" sha1="98fafeb1fbe04dfec9a4ff1d0c159627bb288aad"/>
 	</game>
-	<game name="Skies of Arcadia Legends (USA)">
+	<game name="Skies of Arcadia - Legends (USA)">
 		<category>Games</category>
-		<description>Skies of Arcadia Legends (USA)</description>
-		<rom name="Skies of Arcadia Legends (USA).iso" size="1459978240" crc="23e347b6" md5="3e7fa5033c4a2704434fb6ba98195ecd" sha1="46105320553c858f25fafc5fd357566b505a4940"/>
+		<description>Skies of Arcadia - Legends (USA)</description>
+		<rom name="Skies of Arcadia - Legends (USA).iso" size="1459978240" crc="23e347b6" md5="3e7fa5033c4a2704434fb6ba98195ecd" sha1="46105320553c858f25fafc5fd357566b505a4940"/>
 	</game>
 	<game name="Harvest Moon - Another Wonderful Life (USA)">
 		<category>Games</category>
@@ -4380,10 +4380,10 @@
 		<description>World Soccer Winning Eleven 6 - Final Evolution (Japan)</description>
 		<rom name="World Soccer Winning Eleven 6 - Final Evolution (Japan).iso" size="1459978240" crc="07f76bcc" md5="db339f4d36b698e0c18de99a91c0c165" sha1="4d0a7142474ad5a4d6e7245f252eab308f783fbe"/>
 	</game>
-	<game name="Skies of Arcadia Legends (Europe) (En,Fr,De,Es)">
+	<game name="Skies of Arcadia - Legends (Europe) (En,Fr,De,Es)">
 		<category>Games</category>
-		<description>Skies of Arcadia Legends (Europe) (En,Fr,De,Es)</description>
-		<rom name="Skies of Arcadia Legends (Europe) (En,Fr,De,Es).iso" size="1459978240" crc="a8e18c76" md5="bd814992f1e39d4147c775ff8b32d022" sha1="30ee1d7777fe51bcd7c4deeb867651d5b6e96e41"/>
+		<description>Skies of Arcadia - Legends (Europe) (En,Fr,De,Es)</description>
+		<rom name="Skies of Arcadia - Legends (Europe) (En,Fr,De,Es).iso" size="1459978240" crc="a8e18c76" md5="bd814992f1e39d4147c775ff8b32d022" sha1="30ee1d7777fe51bcd7c4deeb867651d5b6e96e41"/>
 	</game>
 	<game name="Serious Sam - Next Encounter (Europe) (En,Fr,De)">
 		<category>Games</category>
@@ -6555,10 +6555,10 @@
 		<description>2002 FIFA World Cup (Europe) (Fr,Nl)</description>
 		<rom name="2002 FIFA World Cup (Europe) (Fr,Nl).iso" size="1459978240" crc="5980022f" md5="54411489d800faf171f5ff203b1a0c46" sha1="b7e6aa5d84e35fe1de1879c9dcd12c0c1987e275"/>
 	</game>
-	<game name="Nickelodeon SpongeBob SquarePants - The Movie (Europe) (Fr,Nl)">
+	<game name="Nickelodeon The SpongeBob SquarePants Movie (Europe) (Fr,Nl)">
 		<category>Games</category>
-		<description>Nickelodeon SpongeBob SquarePants - The Movie (Europe) (Fr,Nl)</description>
-		<rom name="Nickelodeon SpongeBob SquarePants - The Movie (Europe) (Fr,Nl).iso" size="1459978240" crc="084ea086" md5="5c8a6eeeb849e20c59bc245a56d4f174" sha1="09606bce7bc063d257f006973f1b5c70e8e9cd42"/>
+		<description>Nickelodeon The SpongeBob SquarePants Movie (Europe) (Fr,Nl)</description>
+		<rom name="Nickelodeon The SpongeBob SquarePants Movie (Europe) (Fr,Nl).iso" size="1459978240" crc="084ea086" md5="5c8a6eeeb849e20c59bc245a56d4f174" sha1="09606bce7bc063d257f006973f1b5c70e8e9cd42"/>
 	</game>
 	<game name="FIFA 06 (Netherlands)">
 		<category>Games</category>
@@ -7070,10 +7070,10 @@
 		<description>Nickelodeon SpongeBob SquarePants - Creature from the Krusty Krab (Europe)</description>
 		<rom name="Nickelodeon SpongeBob SquarePants - Creature from the Krusty Krab (Europe).iso" size="1459978240" crc="5dcf1734" md5="10b725bed9a3be326a776db800682b47" sha1="53238fd27c00b2f51b19e2fcf4f3bc8ae34aa612"/>
 	</game>
-	<game name="Nickelodeon SpongeBob SquarePants - The Movie (Europe)">
+	<game name="Nickelodeon The SpongeBob SquarePants Movie (Europe)">
 		<category>Games</category>
-		<description>Nickelodeon SpongeBob SquarePants - The Movie (Europe)</description>
-		<rom name="Nickelodeon SpongeBob SquarePants - The Movie (Europe).iso" size="1459978240" crc="334aac70" md5="62bc84bfcad66e8d24f83873b247b628" sha1="f13f66669639b95d2c63f51cc3deea1b334998e5"/>
+		<description>Nickelodeon The SpongeBob SquarePants Movie (Europe)</description>
+		<rom name="Nickelodeon The SpongeBob SquarePants Movie (Europe).iso" size="1459978240" crc="334aac70" md5="62bc84bfcad66e8d24f83873b247b628" sha1="f13f66669639b95d2c63f51cc3deea1b334998e5"/>
 	</game>
 	<game name="MC Groovz Dance Craze (Europe) (En,Fr,De,Es,It)">
 		<category>Games</category>
@@ -7205,10 +7205,10 @@
 		<description>Gekkan Nintendo Tentou Demo 2002.7.1 (Japan)</description>
 		<rom name="Gekkan Nintendo Tentou Demo 2002.7.1 (Japan).iso" size="1459978240" crc="86dacab6" md5="84936411bf7768bcdac3be8f401ad8eb" sha1="4d7d77f67288902ba17bf6f42d19679e45cbcb54"/>
 	</game>
-	<game name="Gekkan Nintendo Tentou Demo 2002.7.10 (Japan)">
+	<game name="Gekkan Nintendo Tentou Demo 2002.7.10 Zoukan-gou (Japan)">
 		<category>Demos</category>
-		<description>Gekkan Nintendo Tentou Demo 2002.7.10 (Japan)</description>
-		<rom name="Gekkan Nintendo Tentou Demo 2002.7.10 (Japan).iso" size="1459978240" crc="878c6dea" md5="f185e3c31a81519ee0c0b2539ebcd442" sha1="8b863d521ce96c85c9de60a9d95ccf10e6d8edb6"/>
+		<description>Gekkan Nintendo Tentou Demo 2002.7.10 Zoukan-gou (Japan)</description>
+		<rom name="Gekkan Nintendo Tentou Demo 2002.7.10 Zoukan-gou (Japan).iso" size="1459978240" crc="878c6dea" md5="f185e3c31a81519ee0c0b2539ebcd442" sha1="8b863d521ce96c85c9de60a9d95ccf10e6d8edb6"/>
 	</game>
 	<game name="Rune II - Koruten no Kagi no Himitsu (Japan) (Taikenban)">
 		<category>Demos</category>
@@ -7725,10 +7725,10 @@
 		<description>Family Stadium 2003 (Japan)</description>
 		<rom name="Family Stadium 2003 (Japan).iso" size="1459978240" crc="69b9e609" md5="d6fe5f8e1b6c915c6812b073ac23aada" sha1="d49244a31f95a77c296fba70b8b6550b7e017efc"/>
 	</game>
-	<game name="Gakuen Toshi Vara Noir Roses (Japan)">
+	<game name="Gakuen Toshi Varanoir - Roses (Japan)">
 		<category>Games</category>
-		<description>Gakuen Toshi Vara Noir Roses (Japan)</description>
-		<rom name="Gakuen Toshi Vara Noir Roses (Japan).iso" size="1459978240" crc="cf6d0aa5" md5="364f6513ce08ebbfc312e7a05a6b4225" sha1="d403770cba0c71520df8fd853275508130ac04f4"/>
+		<description>Gakuen Toshi Varanoir - Roses (Japan)</description>
+		<rom name="Gakuen Toshi Varanoir - Roses (Japan).iso" size="1459978240" crc="cf6d0aa5" md5="364f6513ce08ebbfc312e7a05a6b4225" sha1="d403770cba0c71520df8fd853275508130ac04f4"/>
 	</game>
 	<game name="Gekitou Pro Yakyuu - Mizushima Shinji All Stars vs. Pro Yakyuu (Japan)">
 		<category>Games</category>
@@ -8660,10 +8660,10 @@
 		<description>SSX on Tour (Europe) (En,Fr,De)</description>
 		<rom name="SSX on Tour (Europe) (En,Fr,De).iso" size="1459978240" crc="886defd6" md5="e86b6fc0db336d2e55c08b23d76ab554" sha1="2a6055689d79602d92a5bbbcf9d5a9613301d802"/>
 	</game>
-	<game name="2 Games in 1 - Bob L'eponge - Le Film + Tak 2 - Le Sceptre des Reves (France) (Disc 1) (Bob L'eponge - Le Film)">
+	<game name="2 Games in 1 - Bob L'eponge - Le Film + Tak 2 - Le Sceptre des Reves (France) (Fr,Nl) (Disc 1) (Bob L'eponge - Le Film)">
 		<category>Games</category>
-		<description>2 Games in 1 - Bob L'eponge - Le Film + Tak 2 - Le Sceptre des Reves (France) (Disc 1) (Bob L'eponge - Le Film)</description>
-		<rom name="2 Games in 1 - Bob L'eponge - Le Film + Tak 2 - Le Sceptre des Reves (France) (Disc 1) (Bob L'eponge - Le Film).iso" size="1459978240" crc="3cb489d7" md5="592585ee660990d4953e8d6b9f961d3c" sha1="e52e6b4d76461a9041dfbcc95ecef8b1d1ecc051"/>
+		<description>2 Games in 1 - Bob L'eponge - Le Film + Tak 2 - Le Sceptre des Reves (France) (Fr,Nl) (Disc 1) (Bob L'eponge - Le Film)</description>
+		<rom name="2 Games in 1 - Bob L'eponge - Le Film + Tak 2 - Le Sceptre des Reves (France) (Fr,Nl) (Disc 1) (Bob L'eponge - Le Film).iso" size="1459978240" crc="3cb489d7" md5="592585ee660990d4953e8d6b9f961d3c" sha1="e52e6b4d76461a9041dfbcc95ecef8b1d1ecc051"/>
 	</game>
 	<game name="2 Games in 1 - Bob L'eponge - Le Film + Tak 2 - Le Sceptre des Reves (France) (Disc 2) (Tak 2 - Le Sceptre des Reves)">
 		<category>Games</category>
@@ -9325,10 +9325,10 @@
 		<description>Disney-Pixar Nemo-reul Chajaseo (Korea)</description>
 		<rom name="Disney-Pixar Nemo-reul Chajaseo (Korea).iso" size="1459978240" crc="312420a2" md5="7ee187f776e1cbed1f8836e645560d46" sha1="340ef094dfe69c0253e1539911f7f508d91108fa"/>
 	</game>
-	<game name="Action Replay for GameCube (USA) (En,Fr,De,Es,It,Pt) (Unl) (v1.08)">
+	<game name="Action Replay for GameCube (USA, Europe) (En,Fr,De,Es,It,Pt) (Unl) (v1.08)">
 		<category>Applications</category>
-		<description>Action Replay for GameCube (USA) (En,Fr,De,Es,It,Pt) (Unl) (v1.08)</description>
-		<rom name="Action Replay for GameCube (USA) (En,Fr,De,Es,It,Pt) (Unl) (v1.08).iso" size="1459978240" crc="9cb75b81" md5="ba5aadafb4b364679e6950d339aaedfd" sha1="8d480dc45b47e11c1bb5f7f500e2c78b08a1153a"/>
+		<description>Action Replay for GameCube (USA, Europe) (En,Fr,De,Es,It,Pt) (Unl) (v1.08)</description>
+		<rom name="Action Replay for GameCube (USA, Europe) (En,Fr,De,Es,It,Pt) (Unl) (v1.08).iso" size="1459978240" crc="9cb75b81" md5="ba5aadafb4b364679e6950d339aaedfd" sha1="8d480dc45b47e11c1bb5f7f500e2c78b08a1153a"/>
 	</game>
 	<game name="Mario Kart - Double Dash!! (Korea)">
 		<category>Games</category>
@@ -9480,10 +9480,10 @@
 		<description>Cube CD 14 (33) (UK) (Unl)</description>
 		<rom name="Cube CD 14 (33) (UK) (Unl).iso" size="1459978240" crc="b21fe659" md5="82109cff554d0ecadb0fffb7030dc5a8" sha1="884052c0eb3f0d515ca0c7b173e0a5dfd8071a35"/>
 	</game>
-	<game name="Action Replay Max (Europe) (En,Fr,De,Es,It,Pt) (Unl)">
+	<game name="Action Replay Max (USA, Europe) (En,Fr,De,Es,It,Pt) (Unl)">
 		<category>Applications</category>
-		<description>Action Replay Max (Europe) (En,Fr,De,Es,It,Pt) (Unl)</description>
-		<rom name="Action Replay Max (Europe) (En,Fr,De,Es,It,Pt) (Unl).iso" size="1459978240" crc="989e3a76" md5="335e62cdeb07ef3e15d1a3bfceaa28d2" sha1="b339b3f828abe509bfbb4a745322eebea54e105d"/>
+		<description>Action Replay Max (USA, Europe) (En,Fr,De,Es,It,Pt) (Unl)</description>
+		<rom name="Action Replay Max (USA, Europe) (En,Fr,De,Es,It,Pt) (Unl).iso" size="1459978240" crc="989e3a76" md5="335e62cdeb07ef3e15d1a3bfceaa28d2" sha1="b339b3f828abe509bfbb4a745322eebea54e105d"/>
 	</game>
 	<game name="Capcom vs. SNK 2 EO (Japan) (Tentou Taikenban)">
 		<category>Demos</category>
@@ -9880,10 +9880,10 @@
 		<description>FIFA Soccer 07 (Latin America)</description>
 		<rom name="FIFA Soccer 07 (Latin America).iso" size="1459978240" crc="eb1be753" md5="f0f6029d90191ac10a92938597735f37" sha1="64ba3862474dc9708d7263e0136299f684f38ee6"/>
 	</game>
-	<game name="Pickles (USA) (Proto)">
+	<game name="Pickles (USA) (Proto 1)">
 		<category>Preproduction</category>
-		<description>Pickles (USA) (Proto)</description>
-		<rom name="Pickles (USA) (Proto).iso" size="1459978240" crc="5542f6e9" md5="3cdde8d4002b4268c573cf2c2a9009c1" sha1="7011e5c016f3e87b9786d542cb555b111c8293ee"/>
+		<description>Pickles (USA) (Proto 1)</description>
+		<rom name="Pickles (USA) (Proto 1).iso" size="1459978240" crc="5542f6e9" md5="3cdde8d4002b4268c573cf2c2a9009c1" sha1="7011e5c016f3e87b9786d542cb555b111c8293ee"/>
 	</game>
 	<game name="18 Wheeler - American Pro Trucker (USA) (Beta) (2001-11-12)">
 		<category>Preproduction</category>
@@ -9969,5 +9969,50 @@
 		<category>Preproduction</category>
 		<description>Evolution Worlds (USA) (Beta)</description>
 		<rom name="Evolution Worlds (USA) (Beta).iso" size="1459978240" crc="74e3fbee" md5="f5a5d5d02b8ce369b53e5efcaf2c5d71" sha1="061ba70fe611a7c36a3a99dc52839fc275724f19"/>
+	</game>
+	<game name="Pickles (USA) (Proto 2)">
+		<category>Preproduction</category>
+		<description>Pickles (USA) (Proto 2)</description>
+		<rom name="Pickles (USA) (Proto 2).iso" size="1459978240" crc="7fa9a839" md5="313057403f079b96926335202a6ca40c" sha1="9038eb0c7c013421a9be5a94fcd3d27c7f2f8767"/>
+	</game>
+	<game name="Advance Connector GC-you (Japan) (Unl)">
+		<category>Applications</category>
+		<description>Advance Connector GC-you (Japan) (Unl)</description>
+		<rom name="Advance Connector GC-you (Japan) (Unl).iso" size="1459978240" crc="93418d2a" md5="9ad3900dbde0c1b588212dce88730b7a" sha1="cf3f68552c099aa2830c2dd74fc3e90d3518f82f"/>
+	</game>
+	<game name="Xeno Crisis (Japan) (En,Ja,Fr,De,Es,It,Nl,Pt) (Unl)">
+		<category>Games</category>
+		<description>Xeno Crisis (Japan) (En,Ja,Fr,De,Es,It,Nl,Pt) (Unl)</description>
+		<rom name="Xeno Crisis (Japan) (En,Ja,Fr,De,Es,It,Nl,Pt) (Unl).iso" size="115898368" crc="0c6d4075" md5="4244e7887f60c1336d711fc4a1fd13e0" sha1="46acc5a470af00a3adf916ba879e382d1540b1c5"/>
+	</game>
+	<game name="Gekkan Nintendo Tentou Demo 2002.8.1 (Japan)">
+		<category>Demos</category>
+		<description>Gekkan Nintendo Tentou Demo 2002.8.1 (Japan)</description>
+		<rom name="Gekkan Nintendo Tentou Demo 2002.8.1 (Japan).iso" size="1459978240" crc="06588854" md5="405c464ef39eb55f63fd6cd0a947de86" sha1="cd7d1418c2aba5ee614fdd22a46b1f48cbbc54cf"/>
+	</game>
+	<game name="NBA Live 2003 (France)">
+		<category>Games</category>
+		<description>NBA Live 2003 (France)</description>
+		<rom name="NBA Live 2003 (France).iso" size="1459978240" crc="ca606a11" md5="b300251ad4be896443143f7dac64e9dc" sha1="f8117becd57e358afed78b35e79800df094bbd3e"/>
+	</game>
+	<game name="Advance Game Port (USA) (Unl) (Rev 2)">
+		<category>Applications</category>
+		<description>Advance Game Port (USA) (Unl) (Rev 2)</description>
+		<rom name="Advance Game Port (USA) (Unl) (Rev 2).iso" size="1459978240" crc="0e8bb8d0" md5="097275ac8c60735001d3c0623529fcfc" sha1="d4ac3fed9cc08a19cdad5e46cc5870e909723691"/>
+	</game>
+	<game name="SD Media Launcher for GameCube &amp; Wii (Japan) (Unl)">
+		<category>Applications</category>
+		<description>SD Media Launcher for GameCube &amp; Wii (Japan) (Unl)</description>
+		<rom name="SD Media Launcher for GameCube &amp; Wii (Japan) (Unl).iso" size="1459978240" crc="7b642b57" md5="4e260af6d573045186b8794587a466a5" sha1="cf5c5e8b9e073a3bbf993cce3910aa0814d9eb96"/>
+	</game>
+	<game name="Mega Man X - Command Mission (USA) (Beta) (2004-07-23)">
+		<category>Preproduction</category>
+		<description>Mega Man X - Command Mission (USA) (Beta) (2004-07-23)</description>
+		<rom name="Mega Man X - Command Mission (USA) (Beta) (2004-07-23).iso" size="1459978240" crc="7b88690e" md5="801aeb70186915ac0a53494006ff74f8" sha1="24d72340954cd62e142a6d11a6582fc5f40ba994"/>
+	</game>
+	<game name="Mario Party 4 Event-you Disc (Japan)">
+		<category>Demos</category>
+		<description>Mario Party 4 Event-you Disc (Japan)</description>
+		<rom name="Mario Party 4 Event-you Disc (Japan).iso" size="1459978240" crc="4d3a81a8" md5="fe10c951d2345f94b0633d4861c65598" sha1="de8c7b6f1ca3e7b4bf29a3fa3d12c4bfc42dfad4"/>
 	</game>
 </datafile>

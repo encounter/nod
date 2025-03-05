@@ -378,6 +378,7 @@ impl BufRead for PartitionReaderWii {
             } else {
                 PartitionEncryption::ForceDecryptedNoHashes
             },
+            force_rehash: false,
         };
 
         // Load sector group

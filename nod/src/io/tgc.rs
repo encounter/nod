@@ -15,14 +15,14 @@ use crate::{
         gcn::{read_dol, read_fst},
         reader::DiscReader,
         writer::{DataCallback, DiscWriter},
-        DiscHeader, PartitionHeader, SECTOR_SIZE,
+        BootHeader, DiscHeader, BB2_OFFSET, SECTOR_SIZE,
     },
     io::block::{Block, BlockKind, BlockReader, TGC_MAGIC},
     read::{DiscMeta, DiscStream, PartitionOptions, PartitionReader},
     util::{
-        align_up_32, array_ref,
+        array_ref,
         read::{read_arc, read_arc_slice, read_from, read_with_zero_fill},
-        static_assert,
+        static_assert, Align,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
     Error, Result, ResultContext,
@@ -82,19 +82,21 @@ impl BlockReaderTGC {
         }
         let disc_size = (header.gcm_files_start.get() + header.user_size.get()) as u64;
 
-        // Read disc header and partition header
+        // Read GCM header
         inner
             .seek(SeekFrom::Start(header.header_offset.get() as u64))
             .context("Seeking to GCM header")?;
         let raw_header =
             read_arc::<[u8; GCM_HEADER_SIZE], _>(inner.as_mut()).context("Reading GCM header")?;
 
-        let (disc_header, remain) = DiscHeader::ref_from_prefix(raw_header.as_ref())
-            .expect("Invalid disc header alignment");
+        let disc_header =
+            DiscHeader::ref_from_bytes(array_ref![raw_header, 0, size_of::<DiscHeader>()])
+                .expect("Invalid disc header alignment");
         let disc_header = disc_header.clone();
-        let (partition_header, _) =
-            PartitionHeader::ref_from_prefix(remain).expect("Invalid partition header alignment");
-        let partition_header = partition_header.clone();
+        let boot_header =
+            BootHeader::ref_from_bytes(array_ref![raw_header, BB2_OFFSET, size_of::<BootHeader>()])
+                .expect("Invalid boot header alignment");
+        let boot_header = boot_header.clone();
 
         // Read DOL
         inner.seek(SeekFrom::Start(header.dol_offset.get() as u64)).context("Seeking to DOL")?;
@@ -116,12 +118,12 @@ impl BlockReaderTGC {
         write_info.push(WriteInfo {
             kind: WriteKind::Static(raw_dol, "sys/main.dol"),
             size: header.dol_size.get() as u64,
-            offset: partition_header.dol_offset(false),
+            offset: boot_header.dol_offset(false),
         });
         write_info.push(WriteInfo {
             kind: WriteKind::Static(raw_fst.clone(), "sys/fst.bin"),
             size: header.fst_size.get() as u64,
-            offset: partition_header.fst_offset(false),
+            offset: boot_header.fst_offset(false),
         });
 
         // Collect files
@@ -136,7 +138,7 @@ impl BlockReaderTGC {
             });
         }
         write_info.sort_unstable_by(|a, b| a.offset.cmp(&b.offset).then(a.size.cmp(&b.size)));
-        let write_info = insert_junk_data(write_info, &partition_header);
+        let write_info = insert_junk_data(write_info, &boot_header);
 
         let file_callback = FileCallbackTGC::new(inner, raw_fst, header);
         let disc_id = *array_ref![disc_header.game_id, 0, 4];
@@ -225,14 +227,13 @@ impl DiscWriterTGC {
         // Read GCM header
         let mut raw_header = <[u8; GCM_HEADER_SIZE]>::new_box_zeroed()?;
         inner.read_exact(raw_header.as_mut()).context("Reading GCM header")?;
-        let (_, remain) = DiscHeader::ref_from_prefix(raw_header.as_ref())
-            .expect("Invalid disc header alignment");
-        let (partition_header, _) =
-            PartitionHeader::ref_from_prefix(remain).expect("Invalid partition header alignment");
+        let boot_header =
+            BootHeader::ref_from_bytes(array_ref![raw_header, BB2_OFFSET, size_of::<BootHeader>()])
+                .expect("Invalid boot header alignment");
 
         // Read DOL
-        let raw_dol = read_dol(inner.as_mut(), partition_header, false)?;
-        let raw_fst = read_fst(inner.as_mut(), partition_header, false)?;
+        let raw_dol = read_dol(inner.as_mut(), boot_header, false)?;
+        let raw_fst = read_fst(inner.as_mut(), boot_header, false)?;
 
         // Parse FST
         let fst = Fst::new(&raw_fst)?;
@@ -249,11 +250,10 @@ impl DiscWriterTGC {
         // Layout system files
         let gcm_header_offset = SECTOR_SIZE as u32;
         let fst_offset = gcm_header_offset + GCM_HEADER_SIZE as u32;
-        let dol_offset = align_up_32(fst_offset + partition_header.fst_size.get(), 32);
+        let dol_offset = (fst_offset + boot_header.fst_size.get()).align_up(32);
         let user_size =
-            partition_header.user_offset.get() + partition_header.user_size.get() - gcm_files_start;
-        let user_end =
-            align_up_32(dol_offset + raw_dol.len() as u32 + user_size, SECTOR_SIZE as u32);
+            boot_header.user_offset.get() + boot_header.user_size.get() - gcm_files_start;
+        let user_end = (dol_offset + raw_dol.len() as u32 + user_size).align_up(SECTOR_SIZE as u32);
         let user_offset = user_end - user_size;
 
         let header = TGCHeader {
@@ -262,8 +262,8 @@ impl DiscWriterTGC {
             header_offset: gcm_header_offset.into(),
             header_size: (GCM_HEADER_SIZE as u32).into(),
             fst_offset: fst_offset.into(),
-            fst_size: partition_header.fst_size,
-            fst_max_size: partition_header.fst_max_size,
+            fst_size: boot_header.fst_size,
+            fst_max_size: boot_header.fst_max_size,
             dol_offset: dol_offset.into(),
             dol_size: (raw_dol.len() as u32).into(),
             user_offset: user_offset.into(),

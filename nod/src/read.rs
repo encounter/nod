@@ -14,10 +14,11 @@ use crate::{
     disc::{
         fst::{Fst, Node},
         wii::{ContentMetadata, Ticket, TmdHeader, H3_TABLE_SIZE, REGION_SIZE},
-        ApploaderHeader, DiscHeader, DolHeader, PartitionHeader, BI2_SIZE, BOOT_SIZE,
+        ApploaderHeader, BootHeader, DebugHeader, DiscHeader, DolHeader, BB2_OFFSET, BI2_SIZE,
+        BOOT_SIZE,
     },
     io::block,
-    util::WindowedReader,
+    util::{array_ref, WindowedReader},
     Result,
 };
 
@@ -198,7 +199,7 @@ pub struct DiscMeta {
 }
 
 /// An open disc partition.
-pub trait PartitionReader: DynClone + BufRead + Seek + Send + Sync {
+pub trait PartitionReader: BufRead + DiscStream {
     /// Whether this is a Wii partition. (GameCube otherwise)
     fn is_wii(&self) -> bool;
 
@@ -306,7 +307,7 @@ dyn_clone::clone_trait_object!(PartitionReader);
 /// Extra disc partition data. (DOL, FST, etc.)
 #[derive(Clone, Debug)]
 pub struct PartitionMeta {
-    /// Disc and partition header (boot.bin)
+    /// Disc and boot header (boot.bin)
     pub raw_boot: Arc<[u8; BOOT_SIZE]>,
     /// Debug and region information (bi2.bin)
     pub raw_bi2: Arc<[u8; BI2_SIZE]>,
@@ -329,16 +330,27 @@ pub struct PartitionMeta {
 impl PartitionMeta {
     /// A view into the disc header.
     #[inline]
-    pub fn header(&self) -> &DiscHeader {
-        DiscHeader::ref_from_bytes(&self.raw_boot[..size_of::<DiscHeader>()])
-            .expect("Invalid header alignment")
+    pub fn disc_header(&self) -> &DiscHeader {
+        DiscHeader::ref_from_bytes(array_ref![self.raw_boot, 0, size_of::<DiscHeader>()])
+            .expect("Invalid disc header alignment")
     }
 
-    /// A view into the partition header.
+    /// A view into the debug header.
     #[inline]
-    pub fn partition_header(&self) -> &PartitionHeader {
-        PartitionHeader::ref_from_bytes(&self.raw_boot[size_of::<DiscHeader>()..])
-            .expect("Invalid partition header alignment")
+    pub fn debug_header(&self) -> &DebugHeader {
+        DebugHeader::ref_from_bytes(array_ref![
+            self.raw_boot,
+            size_of::<DiscHeader>(),
+            size_of::<DebugHeader>()
+        ])
+        .expect("Invalid debug header alignment")
+    }
+
+    /// A view into the boot header.
+    #[inline]
+    pub fn boot_header(&self) -> &BootHeader {
+        BootHeader::ref_from_bytes(array_ref![self.raw_boot, BB2_OFFSET, size_of::<BootHeader>()])
+            .expect("Invalid boot header alignment")
     }
 
     /// A view into the apploader header.

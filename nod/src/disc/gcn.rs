@@ -1,6 +1,6 @@
 use std::{
     io,
-    io::{BufRead, Read, Seek, SeekFrom},
+    io::{BufRead, Seek, SeekFrom},
     mem::size_of,
     sync::Arc,
 };
@@ -10,11 +10,11 @@ use zerocopy::{FromBytes, FromZeros, IntoBytes};
 use crate::{
     disc::{
         preloader::{fetch_sector_group, Preloader, SectorGroup, SectorGroupRequest},
-        ApploaderHeader, DiscHeader, DolHeader, PartitionHeader, BI2_SIZE, BOOT_SIZE,
-        SECTOR_GROUP_SIZE, SECTOR_SIZE,
+        ApploaderHeader, BootHeader, DolHeader, BB2_OFFSET, BI2_SIZE, BOOT_SIZE, SECTOR_GROUP_SIZE,
+        SECTOR_SIZE,
     },
     io::block::BlockReader,
-    read::{PartitionEncryption, PartitionMeta, PartitionReader},
+    read::{DiscStream, PartitionEncryption, PartitionMeta, PartitionReader},
     util::{
         impl_read_for_bufread,
         read::{read_arc, read_arc_slice, read_from},
@@ -69,12 +69,12 @@ impl BufRead for PartitionReaderGC {
 
         let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
         let group_idx = abs_sector / 64;
-        let abs_group_sector = group_idx * 64;
         let max_groups = self.disc_size.div_ceil(SECTOR_GROUP_SIZE as u64) as u32;
         let request = SectorGroupRequest {
             group_idx,
             partition_idx: None,
             mode: PartitionEncryption::Original,
+            force_rehash: false,
         };
 
         // Load sector group
@@ -82,7 +82,7 @@ impl BufRead for PartitionReaderGC {
             fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
 
         // Calculate the number of consecutive sectors in the group
-        let group_sector = abs_sector - abs_group_sector;
+        let group_sector = abs_sector - sector_group.start_sector;
         let consecutive_sectors = sector_group.consecutive_sectors(group_sector);
         if consecutive_sectors == 0 {
             return Ok(&[]);
@@ -90,7 +90,7 @@ impl BufRead for PartitionReaderGC {
         let num_sectors = group_sector + consecutive_sectors;
 
         // Read from sector group buffer
-        let group_start = abs_group_sector as u64 * SECTOR_SIZE as u64;
+        let group_start = sector_group.start_sector as u64 * SECTOR_SIZE as u64;
         let offset = (self.pos - group_start) as usize;
         let end =
             (num_sectors as u64 * SECTOR_SIZE as u64).min(self.disc_size - group_start) as usize;
@@ -131,12 +131,14 @@ impl PartitionReader for PartitionReaderGC {
 }
 
 pub(crate) fn read_dol(
-    reader: &mut dyn PartitionReader,
-    partition_header: &PartitionHeader,
+    // TODO: replace with &dyn mut DiscStream when trait_upcasting is stabilized
+    // https://github.com/rust-lang/rust/issues/65991
+    reader: &mut (impl DiscStream + ?Sized),
+    boot_header: &BootHeader,
     is_wii: bool,
 ) -> Result<Arc<[u8]>> {
     reader
-        .seek(SeekFrom::Start(partition_header.dol_offset(is_wii)))
+        .seek(SeekFrom::Start(boot_header.dol_offset(is_wii)))
         .context("Seeking to DOL offset")?;
     let dol_header: DolHeader = read_from(reader).context("Reading DOL header")?;
     let dol_size = (dol_header.text_offs.iter().zip(&dol_header.text_sizes))
@@ -150,30 +152,28 @@ pub(crate) fn read_dol(
     Ok(Arc::from(raw_dol))
 }
 
-pub(crate) fn read_fst<R>(
-    reader: &mut R,
-    partition_header: &PartitionHeader,
+pub(crate) fn read_fst(
+    // TODO: replace with &dyn mut DiscStream when trait_upcasting is stabilized
+    // https://github.com/rust-lang/rust/issues/65991
+    reader: &mut (impl DiscStream + ?Sized),
+    boot_header: &BootHeader,
     is_wii: bool,
-) -> Result<Arc<[u8]>>
-where
-    R: Read + Seek + ?Sized,
-{
+) -> Result<Arc<[u8]>> {
     reader
-        .seek(SeekFrom::Start(partition_header.fst_offset(is_wii)))
+        .seek(SeekFrom::Start(boot_header.fst_offset(is_wii)))
         .context("Seeking to FST offset")?;
-    let raw_fst: Arc<[u8]> = read_arc_slice(reader, partition_header.fst_size(is_wii) as usize)
+    let raw_fst: Arc<[u8]> = read_arc_slice(reader, boot_header.fst_size(is_wii) as usize)
         .with_context(|| {
             format!(
                 "Reading partition FST (offset {}, size {})",
-                partition_header.fst_offset(is_wii),
-                partition_header.fst_size(is_wii)
+                boot_header.fst_offset(is_wii),
+                boot_header.fst_size(is_wii)
             )
         })?;
     Ok(raw_fst)
 }
 
-pub(crate) fn read_apploader<R>(reader: &mut R) -> Result<Arc<[u8]>>
-where R: Read + Seek + ?Sized {
+pub(crate) fn read_apploader(reader: &mut dyn DiscStream) -> Result<Arc<[u8]>> {
     reader
         .seek(SeekFrom::Start(BOOT_SIZE as u64 + BI2_SIZE as u64))
         .context("Seeking to apploader offset")?;
@@ -190,14 +190,10 @@ where R: Read + Seek + ?Sized {
     Ok(Arc::from(raw_apploader))
 }
 
-pub(crate) fn read_part_meta(
-    reader: &mut dyn PartitionReader,
-    is_wii: bool,
-) -> Result<PartitionMeta> {
+pub(crate) fn read_part_meta(reader: &mut dyn DiscStream, is_wii: bool) -> Result<PartitionMeta> {
     // boot.bin
     let raw_boot: Arc<[u8; BOOT_SIZE]> = read_arc(reader).context("Reading boot.bin")?;
-    let partition_header =
-        PartitionHeader::ref_from_bytes(&raw_boot[size_of::<DiscHeader>()..]).unwrap();
+    let boot_header = BootHeader::ref_from_bytes(&raw_boot[BB2_OFFSET..]).unwrap();
 
     // bi2.bin
     let raw_bi2: Arc<[u8; BI2_SIZE]> = read_arc(reader).context("Reading bi2.bin")?;
@@ -206,10 +202,10 @@ pub(crate) fn read_part_meta(
     let raw_apploader = read_apploader(reader)?;
 
     // fst.bin
-    let raw_fst = read_fst(reader, partition_header, is_wii)?;
+    let raw_fst = read_fst(reader, boot_header, is_wii)?;
 
     // main.dol
-    let raw_dol = read_dol(reader, partition_header, is_wii)?;
+    let raw_dol = read_dol(reader, boot_header, is_wii)?;
 
     Ok(PartitionMeta {
         raw_boot,

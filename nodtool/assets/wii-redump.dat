@@ -3,9 +3,9 @@
 <datafile>
 	<header>
 		<name>Nintendo - Wii</name>
-		<description>Nintendo - Wii - Discs (3770) (2024-02-13 21-52-18)</description>
-		<version>2024-02-13 21-52-18</version>
-		<date>2024-02-13 21-52-18</date>
+		<description>Nintendo - Wii - Discs (3775) (2024-11-29 20-05-00)</description>
+		<version>2024-11-29 20-05-00</version>
+		<date>2024-11-29 20-05-00</date>
 		<author>redump.org</author>
 		<homepage>redump.org</homepage>
 		<url>http://redump.org/</url>
@@ -400,10 +400,10 @@
 		<description>Wii Music (USA) (En,Fr,Es)</description>
 		<rom name="Wii Music (USA) (En,Fr,Es).iso" size="4699979776" crc="59d46fe4" md5="ce0d062df2a18fcbb145e52634679ca6" sha1="50c784119b4e5cfed244a744183c9d5214227840"/>
 	</game>
-	<game name="Trauma Center - New Blood (USA)">
+	<game name="Trauma Center - New Blood (USA) (En,Ja)">
 		<category>Games</category>
-		<description>Trauma Center - New Blood (USA)</description>
-		<rom name="Trauma Center - New Blood (USA).iso" size="4699979776" crc="1b9fc0a4" md5="4ece4485e318a2fa2aab5cbf5aab1b18" sha1="3778e0c4d0b74be925c894813c9f6e2c6078dda5"/>
+		<description>Trauma Center - New Blood (USA) (En,Ja)</description>
+		<rom name="Trauma Center - New Blood (USA) (En,Ja).iso" size="4699979776" crc="1b9fc0a4" md5="4ece4485e318a2fa2aab5cbf5aab1b18" sha1="3778e0c4d0b74be925c894813c9f6e2c6078dda5"/>
 	</game>
 	<game name="Kororinpa - Marble Mania (USA)">
 		<category>Games</category>
@@ -13390,10 +13390,10 @@
 		<description>Nickelodeon Dora the Explorer - Dora Saves the Snow Princess (Europe) (En,Fr,Nl)</description>
 		<rom name="Nickelodeon Dora the Explorer - Dora Saves the Snow Princess (Europe) (En,Fr,Nl).iso" size="4699979776" crc="bc05608d" md5="b08b2d0a6a7262cd43069ca94fc2cb57" sha1="cfb57ba6736728b181e84826f11d20428bddcb13"/>
 	</game>
-	<game name="Food Network - Cook or Be Cooked (USA)">
+	<game name="Food Network - Cook or Be Cooked! (USA)">
 		<category>Games</category>
-		<description>Food Network - Cook or Be Cooked (USA)</description>
-		<rom name="Food Network - Cook or Be Cooked (USA).iso" size="4699979776" crc="30a9d897" md5="ce5ec10957e7f90bdf1419237ed612f7" sha1="8dfc46d40fde135de2fb24d1e056bcf53001c714"/>
+		<description>Food Network - Cook or Be Cooked! (USA)</description>
+		<rom name="Food Network - Cook or Be Cooked! (USA).iso" size="4699979776" crc="30a9d897" md5="ce5ec10957e7f90bdf1419237ed612f7" sha1="8dfc46d40fde135de2fb24d1e056bcf53001c714"/>
 	</game>
 	<game name="Get Fit with Mel B (USA) (En,Fr,Es)">
 		<category>Games</category>
@@ -17300,10 +17300,10 @@
 		<description>Horrid Henry - Missions of Mischief (Europe) (En,Fr,De,Es,It)</description>
 		<rom name="Horrid Henry - Missions of Mischief (Europe) (En,Fr,De,Es,It).iso" size="4699979776" crc="58596d71" md5="c5225b3248eebb54f0256cbf3c518e34" sha1="cd1bbc1540bf9773c56572617dc4e7bc0874d8b7"/>
 	</game>
-	<game name="I'm a Celebrity...Get Me Out of Here! (Europe)">
+	<game name="I'm a Celebrity...Get Me Out of Here! (UK)">
 		<category>Games</category>
-		<description>I'm a Celebrity...Get Me Out of Here! (Europe)</description>
-		<rom name="I'm a Celebrity...Get Me Out of Here! (Europe).iso" size="4699979776" crc="96f013c7" md5="c272b7ad6ea6f7e170f9603092f9cc5b" sha1="34c56074bce0e4ba2bc36696954d21f8e38b0602"/>
+		<description>I'm a Celebrity...Get Me Out of Here! (UK)</description>
+		<rom name="I'm a Celebrity...Get Me Out of Here! (UK).iso" size="4699979776" crc="96f013c7" md5="c272b7ad6ea6f7e170f9603092f9cc5b" sha1="34c56074bce0e4ba2bc36696954d21f8e38b0602"/>
 	</game>
 	<game name="Musiic Party - Rock the House (UK) (En,Fr,De,Es,It)">
 		<category>Games</category>
@@ -17945,10 +17945,10 @@
 		<description>Transformers - The Game (Korea)</description>
 		<rom name="Transformers - The Game (Korea).iso" size="4699979776" crc="65b28e90" md5="caa4ba68d9590cb14f268d6b859de799" sha1="f0f1c9e40010a5ea40c6119fc2d1d06ebd0e35e9"/>
 	</game>
-	<game name="FreeLoader for Nintendo Wii (USA) (Unl)">
+	<game name="FreeLoader for Nintendo Wii (USA) (Unl) (Rev 1)">
 		<category>Applications</category>
-		<description>FreeLoader for Nintendo Wii (USA) (Unl)</description>
-		<rom name="FreeLoader for Nintendo Wii (USA) (Unl).iso" size="1459978240" crc="1cc40417" md5="7ef5176eee10d71f6094bae0821d0b44" sha1="3cbab4236fe31abc15e253adadf963ba8fa7261d"/>
+		<description>FreeLoader for Nintendo Wii (USA) (Unl) (Rev 1)</description>
+		<rom name="FreeLoader for Nintendo Wii (USA) (Unl) (Rev 1).iso" size="1459978240" crc="1cc40417" md5="7ef5176eee10d71f6094bae0821d0b44" sha1="3cbab4236fe31abc15e253adadf963ba8fa7261d"/>
 	</game>
 	<game name="FreeLoader for Nintendo Wii (Japan) (Unl)">
 		<category>Applications</category>
@@ -18450,10 +18450,10 @@
 		<description>Fishing Master World Tour (USA) (Beta) (2008-11-14)</description>
 		<rom name="Fishing Master World Tour (USA) (Beta) (2008-11-14).iso" size="4707319808" crc="e030529b" md5="f4530ea0a779d4f47f1e9682d6cb8d45" sha1="87d23879d8320f6d8d4d84df796587bbd3ef6ed1"/>
 	</game>
-	<game name="Food Network - Cook or Be Cooked (USA) (Beta) (2009-07-20)">
+	<game name="Food Network - Cook or Be Cooked! (USA) (Beta) (2009-07-20)">
 		<category>Preproduction</category>
-		<description>Food Network - Cook or Be Cooked (USA) (Beta) (2009-07-20)</description>
-		<rom name="Food Network - Cook or Be Cooked (USA) (Beta) (2009-07-20).iso" size="4707319808" crc="d5aae4a9" md5="3d4e8632d621dfdc142c364e2f645822" sha1="6d10aa3438a655a4e348b82a4e78ff6120690bc5"/>
+		<description>Food Network - Cook or Be Cooked! (USA) (Beta) (2009-07-20)</description>
+		<rom name="Food Network - Cook or Be Cooked! (USA) (Beta) (2009-07-20).iso" size="4707319808" crc="d5aae4a9" md5="3d4e8632d621dfdc142c364e2f645822" sha1="6d10aa3438a655a4e348b82a4e78ff6120690bc5"/>
 	</game>
 	<game name="Fragile Dreams - Farewell Ruins of the Moon (USA) (Beta) (2009-12-10)">
 		<category>Preproduction</category>
@@ -18810,10 +18810,10 @@
 		<description>Lara Croft Tomb Raider - Anniversary (USA) (Beta) (2007-09-20)</description>
 		<rom name="Lara Croft Tomb Raider - Anniversary (USA) (Beta) (2007-09-20).iso" size="4707319808" crc="61ef67d0" md5="0bf1f1a9941519c76c5f1e957c6118cd" sha1="3c897f945fa9ee1a681f07654a9484c23bdf63fc"/>
 	</game>
-	<game name="Trauma Center - New Blood (USA) (Beta) (2007-10-02)">
+	<game name="Trauma Center - New Blood (USA) (En,Ja) (Beta) (2007-10-02)">
 		<category>Preproduction</category>
-		<description>Trauma Center - New Blood (USA) (Beta) (2007-10-02)</description>
-		<rom name="Trauma Center - New Blood (USA) (Beta) (2007-10-02).iso" size="4707319808" crc="6f01fefc" md5="7c38e763310b81ac68df7eacd4f58a11" sha1="5fed4b32ba9d06d1fbc21d9771b111f2279d1a16"/>
+		<description>Trauma Center - New Blood (USA) (En,Ja) (Beta) (2007-10-02)</description>
+		<rom name="Trauma Center - New Blood (USA) (En,Ja) (Beta) (2007-10-02).iso" size="4707319808" crc="6f01fefc" md5="7c38e763310b81ac68df7eacd4f58a11" sha1="5fed4b32ba9d06d1fbc21d9771b111f2279d1a16"/>
 	</game>
 	<game name="Wacky World of Sports (USA) (Beta) (2009-03-25)">
 		<category>Preproduction</category>
@@ -18859,5 +18859,30 @@
 		<category>Preproduction</category>
 		<description>Yu-Gi-Oh! 5D's - Duel Transer (USA) (Beta) (2010-07-15)</description>
 		<rom name="Yu-Gi-Oh! 5D's - Duel Transer (USA) (Beta) (2010-07-15).iso" size="4707319808" crc="fc013893" md5="572d467f9186b5f7203bfb2723ab2423" sha1="df639ddde0fdae538931443e18db80dface559fd"/>
+	</game>
+	<game name="Deca Sporta - Wiiro Jeulgineun Sports 10 Jongmok! (Korea)">
+		<category>Games</category>
+		<description>Deca Sporta - Wiiro Jeulgineun Sports 10 Jongmok! (Korea)</description>
+		<rom name="Deca Sporta - Wiiro Jeulgineun Sports 10 Jongmok! (Korea).iso" size="4699979776" crc="a5643872" md5="89b7a6b6952c0d1c2a4d3a45e91b2c0f" sha1="58454d77b159066845d3774853eeb87145c5e742"/>
+	</game>
+	<game name="Wii Fit (Japan) (Taikenban)">
+		<category>Demos</category>
+		<description>Wii Fit (Japan) (Taikenban)</description>
+		<rom name="Wii Fit (Japan) (Taikenban).iso" size="4699979776" crc="840639c5" md5="6428ece705a4f8e8528d72d3228ce02f" sha1="7edfe8a76c90fd8abc5d60c2643ef7791d080223"/>
+	</game>
+	<game name="FreeLoader for Nintendo Wii (USA) (Unl)">
+		<category>Applications</category>
+		<description>FreeLoader for Nintendo Wii (USA) (Unl)</description>
+		<rom name="FreeLoader for Nintendo Wii (USA) (Unl).iso" size="1459978240" crc="20261177" md5="5d7f821663974428804dae7df56f789d" sha1="70c05e6713e6f7acbc65929628b4ab35bb94eb7d"/>
+	</game>
+	<game name="Food Network - Cook or Be Cooked! (USA) (Demo)">
+		<category>Demos</category>
+		<description>Food Network - Cook or Be Cooked! (USA) (Demo)</description>
+		<rom name="Food Network - Cook or Be Cooked! (USA) (Demo).iso" size="4699979776" crc="16705e31" md5="6b8659f8ec82a16e9442df2c589cf601" sha1="3c623f447cb6cbf2c7abd9ce18f232cc2f00ff95"/>
+	</game>
+	<game name="Disney Sing It (Russia) (En,Ru)">
+		<category>Games</category>
+		<description>Disney Sing It (Russia) (En,Ru)</description>
+		<rom name="Disney Sing It (Russia) (En,Ru).iso" size="4699979776" crc="23644f21" md5="1d86f24d8f618c34e466a82f1f4a27e7" sha1="201c9ad4442830879b538e54c1fcc8e137fa7a92"/>
 	</game>
 </datafile>

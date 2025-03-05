@@ -160,7 +160,7 @@ pub enum Error {
     #[error("disc format error: {0}")]
     DiscFormat(String),
     /// A general I/O error.
-    #[error("I/O error: {0}")]
+    #[error("{0}")]
     Io(String, #[source] std::io::Error),
     /// An unknown error.
     #[error("error: {0}")]
@@ -223,5 +223,36 @@ where E: ErrorContext
     fn with_context<F>(self, f: F) -> Result<T>
     where F: FnOnce() -> String {
         self.map_err(|e| e.context(f()))
+    }
+}
+
+pub(crate) trait IoErrorContext {
+    fn io_context(self, context: impl Into<String>) -> std::io::Error;
+}
+
+impl IoErrorContext for std::io::Error {
+    #[inline]
+    fn io_context(self, context: impl Into<String>) -> std::io::Error {
+        std::io::Error::new(self.kind(), self.context(context))
+    }
+}
+
+pub(crate) trait IoResultContext<T> {
+    fn io_context(self, context: impl Into<String>) -> std::io::Result<T>;
+
+    fn io_with_context<F>(self, f: F) -> std::io::Result<T>
+    where F: FnOnce() -> String;
+}
+
+impl<T> IoResultContext<T> for std::io::Result<T> {
+    #[inline]
+    fn io_context(self, context: impl Into<String>) -> std::io::Result<T> {
+        self.map_err(|e| e.io_context(context))
+    }
+
+    #[inline]
+    fn io_with_context<F>(self, f: F) -> std::io::Result<T>
+    where F: FnOnce() -> String {
+        self.map_err(|e| e.io_context(f()))
     }
 }

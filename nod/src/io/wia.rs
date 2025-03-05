@@ -19,7 +19,7 @@ use crate::{
         reader::DiscReader,
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         writer::{par_process, read_block, BlockProcessor, BlockResult, DataCallback, DiscWriter},
-        DiscHeader, PartitionHeader, SECTOR_SIZE,
+        BootHeader, DiscHeader, SECTOR_SIZE,
     },
     io::{
         block::{Block, BlockKind, BlockReader, RVZ_MAGIC, WIA_MAGIC},
@@ -28,15 +28,15 @@ use crate::{
     read::{DiscMeta, DiscStream},
     util::{
         aes::decrypt_sector_data_b2b,
-        align_up_32, align_up_64, array_ref, array_ref_mut,
+        array_ref, array_ref_mut,
         compress::{Compressor, DecompressionKind, Decompressor},
         digest::{sha1_hash, xxh64_hash, DigestManager},
         lfg::{LaggedFibonacci, SEED_SIZE, SEED_SIZE_BYTES},
         read::{read_arc_slice, read_from, read_vec},
-        static_assert,
+        static_assert, Align,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
-    Error, Result, ResultContext,
+    Error, IoResultContext, Result, ResultContext,
 };
 
 const WIA_VERSION: u32 = 0x01000000;
@@ -395,7 +395,7 @@ pub struct WIARawData {
 }
 
 impl WIARawData {
-    pub fn start_offset(&self) -> u64 { self.raw_data_offset.get() & !(SECTOR_SIZE as u64 - 1) }
+    pub fn start_offset(&self) -> u64 { self.raw_data_offset.get().align_down(SECTOR_SIZE as u64) }
 
     pub fn start_sector(&self) -> u32 { (self.start_offset() / SECTOR_SIZE as u64) as u32 }
 
@@ -457,19 +457,21 @@ pub struct RVZGroup {
     pub rvz_packed_size: U32,
 }
 
+const COMPRESSED_BIT: u32 = 1 << 31;
+
 impl RVZGroup {
     #[inline]
-    pub fn data_size(&self) -> u32 { self.data_size_and_flag.get() & 0x7FFFFFFF }
+    pub fn data_size(&self) -> u32 { self.data_size_and_flag.get() & !COMPRESSED_BIT }
 
     #[inline]
-    pub fn is_compressed(&self) -> bool { self.data_size_and_flag.get() & 0x80000000 != 0 }
+    pub fn is_compressed(&self) -> bool { self.data_size_and_flag.get() & COMPRESSED_BIT != 0 }
 }
 
 impl From<&WIAGroup> for RVZGroup {
     fn from(value: &WIAGroup) -> Self {
         Self {
             data_offset: value.data_offset,
-            data_size_and_flag: U32::new(value.data_size.get() | 0x80000000),
+            data_size_and_flag: U32::new(value.data_size.get() | COMPRESSED_BIT),
             rvz_packed_size: U32::new(0),
         }
     }
@@ -886,23 +888,40 @@ impl BlockReader for BlockReaderWIA {
                 || !group.is_compressed();
         let mut exception_lists = vec![];
         if info.in_partition && uncompressed_exception_lists {
-            exception_lists = read_exception_lists(&mut group_data, chunk_size, true)?;
+            exception_lists = read_exception_lists(&mut group_data, chunk_size, true)
+                .io_context("Reading uncompressed exception lists")?;
         }
         let mut decompressed = if group.is_compressed() {
-            let mut decompressed = BytesMut::zeroed(chunk_size as usize);
-            let len = self.decompressor.decompress(group_data.as_ref(), decompressed.as_mut())?;
+            let max_decompressed_size =
+                self.decompressor.get_content_size(group_data.as_ref())?.unwrap_or_else(|| {
+                    if info.in_partition && !uncompressed_exception_lists {
+                        // Add room for potential hash exceptions. See [WIAExceptionList] for details on the
+                        // maximum number of exceptions.
+                        chunk_size as usize
+                            + (2 + 3328 * size_of::<WIAException>())
+                                * (chunk_size as usize).div_ceil(0x200000)
+                    } else {
+                        chunk_size as usize
+                    }
+                });
+            let mut decompressed = BytesMut::zeroed(max_decompressed_size);
+            let len = self
+                .decompressor
+                .decompress(group_data.as_ref(), decompressed.as_mut())
+                .io_context("Decompressing group data")?;
             decompressed.truncate(len);
             decompressed.freeze()
         } else {
             group_data
         };
         if info.in_partition && !uncompressed_exception_lists {
-            exception_lists = read_exception_lists(&mut decompressed, chunk_size, false)?;
+            exception_lists = read_exception_lists(&mut decompressed, chunk_size, false)
+                .io_context("Reading compressed exception lists")?;
         }
 
         if group.rvz_packed_size.get() > 0 {
             // Decode RVZ packed data
-            rvz_unpack(&mut decompressed, out, &info)?;
+            rvz_unpack(&mut decompressed, out, &info).io_context("Unpacking RVZ group data")?;
         } else {
             // Read and decompress data
             if decompressed.remaining() != info.size as usize {
@@ -975,9 +994,9 @@ fn rvz_unpack(data: &mut impl Buf, out: &mut [u8], info: &GroupInfo) -> io::Resu
     while data.remaining() >= 4 {
         let size = data.get_u32();
         let remain = out.len() - read;
-        if size & 0x80000000 != 0 {
+        if size & COMPRESSED_BIT != 0 {
             // Junk data
-            let size = size & 0x7FFFFFFF;
+            let size = size & !COMPRESSED_BIT;
             if size as usize > remain {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -1057,14 +1076,13 @@ impl JunkInfo {
         start_sector: u32,
         end_sector: u32,
         disc_header: &DiscHeader,
-        partition_header: Option<&PartitionHeader>,
+        boot_header: Option<&BootHeader>,
         fst: Option<Fst>,
     ) -> Self {
         let is_wii = disc_header.is_wii();
         let mut file_ends = BTreeSet::new();
-        if let Some(partition_header) = partition_header {
-            file_ends
-                .insert(partition_header.fst_offset(is_wii) + partition_header.fst_size(is_wii));
+        if let Some(boot_header) = boot_header {
+            file_ends.insert(boot_header.fst_offset(is_wii) + boot_header.fst_size(is_wii));
         }
         if let Some(fst) = fst {
             for entry in fst.nodes.iter().filter(|n| n.is_file()) {
@@ -1145,7 +1163,7 @@ impl BlockProcessor for BlockProcessorWIA {
         };
 
         let uncompressed_size =
-            align_up_32(hash_exception_data.len() as u32, 4) + group_data.len() as u32;
+            (hash_exception_data.len() as u32).align_up(4) + group_data.len() as u32;
         if hash_exception_data.as_ref().iter().all(|&b| b == 0)
             && group_data.as_ref().iter().all(|&b| b == 0)
         {
@@ -1167,7 +1185,7 @@ impl BlockProcessor for BlockProcessorWIA {
         if is_rvz {
             if let Some(packed_data) = self.try_rvz_pack(group_data.as_ref(), &info) {
                 meta.data_size =
-                    align_up_32(hash_exception_data.len() as u32, 4) + packed_data.len() as u32;
+                    (hash_exception_data.len() as u32).align_up(4) + packed_data.len() as u32;
                 meta.rvz_packed_size = packed_data.len() as u32;
                 group_data = packed_data;
             }
@@ -1185,9 +1203,9 @@ impl BlockProcessor for BlockProcessorWIA {
                 let compressed_size = self.compressor.buffer.len() as u32;
                 // For WIA, we must always store compressed data.
                 // For RVZ, only store compressed data if it's smaller than uncompressed.
-                if !is_rvz || align_up_32(compressed_size, 4) < meta.data_size {
+                if !is_rvz || compressed_size.align_up(4) < meta.data_size {
                     // Align resulting block data to 4 bytes
-                    let mut buf = BytesMut::zeroed(align_up_32(compressed_size, 4) as usize);
+                    let mut buf = BytesMut::zeroed(compressed_size.align_up(4) as usize);
                     buf[..compressed_size as usize].copy_from_slice(&self.compressor.buffer);
                     meta.is_compressed = true;
                     // Data size does not include end alignment
@@ -1214,9 +1232,9 @@ impl BlockProcessor for BlockProcessorWIA {
         }
 
         // Store uncompressed group, aligned to 4 bytes after hash exceptions and at the end
-        let mut buf = BytesMut::zeroed(align_up_32(meta.data_size, 4) as usize);
+        let mut buf = BytesMut::zeroed(meta.data_size.align_up(4) as usize);
         buf[..hash_exception_data.len()].copy_from_slice(hash_exception_data.as_ref());
-        let offset = align_up_32(hash_exception_data.len() as u32, 4) as usize;
+        let offset = (hash_exception_data.len() as u32).align_up(4) as usize;
         buf[offset..offset + group_data.len()].copy_from_slice(group_data.as_ref());
         meta.data_hash = xxh64_hash(buf.as_ref());
         Ok(BlockResult { block_idx: group_idx, disc_data, block_data: buf.freeze(), meta })
@@ -1336,7 +1354,7 @@ impl BlockProcessorWIA {
                     sector,
                 );
             }
-            *array_ref_mut![out, offset, 4] = (len as u32 | 0x80000000).to_be_bytes();
+            *array_ref_mut![out, offset, 4] = (len as u32 | COMPRESSED_BIT).to_be_bytes();
             array_ref_mut![out, offset + 4, SEED_SIZE_BYTES].copy_from_slice(seed_out.as_bytes());
         }
 
@@ -1528,13 +1546,11 @@ impl DiscWriterWIA {
             let partition_data_start = partition.data_start_sector as u64 * SECTOR_SIZE as u64;
             let partition_end = partition.data_end_sector as u64 * SECTOR_SIZE as u64;
 
-            let partition_header = partition.partition_header();
-            let management_data_end = align_up_64(
-                partition_offset_to_raw(
-                    partition_header.fst_offset(true) + partition_header.fst_size(true),
-                ),
-                0x200000, // Align to 2 MiB
-            );
+            let boot_header = partition.boot_header();
+            let management_data_end =
+                partition_offset_to_raw(boot_header.fst_offset(true) + boot_header.fst_size(true))
+                    // Align to 2 MiB
+                    .align_up(0x200000);
             let management_end_sector = ((partition_data_start + management_data_end)
                 .min(partition_end)
                 / SECTOR_SIZE as u64) as u32;
@@ -1629,7 +1645,7 @@ impl DiscWriterWIA {
                 partition.data_start_sector,
                 partition.data_end_sector,
                 partition.disc_header(),
-                Some(partition.partition_header()),
+                Some(partition.boot_header()),
                 partition.fst(),
             ));
         }
@@ -1637,7 +1653,7 @@ impl DiscWriterWIA {
             0,
             disc_size.div_ceil(SECTOR_SIZE as u64) as u32,
             disc_header,
-            inner.partition_header(),
+            inner.boot_header(),
             inner.fst(),
         ));
 
@@ -1713,7 +1729,7 @@ impl DiscWriter for DiscWriterWIA {
                 groups[group_idx as usize] = RVZGroup {
                     data_offset: data_offset.into(),
                     data_size_and_flag: (group.meta.data_size
-                        | if group.meta.is_compressed { 0x80000000 } else { 0 })
+                        | if group.meta.is_compressed { COMPRESSED_BIT } else { 0 })
                     .into(),
                     rvz_packed_size: group.meta.rvz_packed_size.into(),
                 };

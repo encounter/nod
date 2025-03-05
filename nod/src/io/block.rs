@@ -107,7 +107,8 @@ pub const WBFS_MAGIC: MagicBytes = *b"WBFS";
 pub const WIA_MAGIC: MagicBytes = *b"WIA\x01";
 pub const RVZ_MAGIC: MagicBytes = *b"RVZ\x01";
 
-pub fn detect<R: Read + ?Sized>(stream: &mut R) -> io::Result<Option<Format>> {
+pub fn detect<R>(stream: &mut R) -> io::Result<Option<Format>>
+where R: Read + ?Sized {
     let data: [u8; 0x20] = match read_from(stream) {
         Ok(magic) => magic,
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),

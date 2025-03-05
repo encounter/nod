@@ -5,6 +5,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use polonius_the_crab::{polonius, polonius_return};
 use tracing::warn;
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -21,13 +22,13 @@ use crate::{
             PartitionReaderWii, WiiPartEntry, WiiPartGroup, WiiPartitionHeader, REGION_OFFSET,
             REGION_SIZE, WII_PART_GROUP_OFF,
         },
-        DiscHeader, PartitionHeader, BOOT_SIZE, DL_DVD_SIZE, MINI_DVD_SIZE, SECTOR_GROUP_SIZE,
-        SECTOR_SIZE, SL_DVD_SIZE,
+        BootHeader, DiscHeader, BB2_OFFSET, BOOT_SIZE, DL_DVD_SIZE, MINI_DVD_SIZE,
+        SECTOR_GROUP_SIZE, SECTOR_SIZE, SL_DVD_SIZE,
     },
     io::block::BlockReader,
     read::{DiscMeta, DiscOptions, PartitionEncryption, PartitionOptions, PartitionReader},
     util::{
-        impl_read_for_bufread,
+        array_ref, impl_read_for_bufread,
         read::{read_arc, read_from, read_vec},
     },
     Error, Result, ResultContext,
@@ -210,15 +211,18 @@ impl DiscReader {
         }
     }
 
+    /// A reference to the disc's boot header (BB2) for GameCube discs.
+    /// For Wii discs, use the boot header from the appropriate [PartitionInfo].
     #[inline]
-    pub fn partition_header(&self) -> Option<&PartitionHeader> {
+    pub fn boot_header(&self) -> Option<&BootHeader> {
         match &self.disc_data {
             DiscReaderData::GameCube { .. } => Some(
-                PartitionHeader::ref_from_bytes(
-                    &self.raw_boot[size_of::<DiscHeader>()
-                        ..size_of::<DiscHeader>() + size_of::<PartitionHeader>()],
-                )
-                .expect("Invalid partition header alignment"),
+                BootHeader::ref_from_bytes(array_ref![
+                    self.raw_boot,
+                    BB2_OFFSET,
+                    size_of::<BootHeader>()
+                ])
+                .expect("Invalid boot header alignment"),
             ),
             _ => None,
         }
@@ -306,48 +310,62 @@ impl DiscReader {
         }
     }
 
-    pub fn fill_buf_internal(&mut self) -> io::Result<Bytes> {
-        if self.pos >= self.size {
-            return Ok(Bytes::new());
-        }
-
-        // Read from modified disc header
-        if self.pos < size_of::<DiscHeader>() as u64 {
-            if let Some(alt_disc_header) = &self.alt_disc_header {
-                return Ok(Bytes::copy_from_slice(
-                    &alt_disc_header.as_bytes()[self.pos as usize..],
-                ));
-            }
-        }
-
-        // Build sector group request
-        let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
-        let (request, abs_group_sector, max_groups) = if let Some(partition) =
+    pub fn load_sector_group(
+        &mut self,
+        abs_sector: u32,
+        force_rehash: bool,
+    ) -> io::Result<(&SectorGroup, bool)> {
+        let (request, max_groups) = if let Some(partition) =
             self.orig_partitions().iter().find(|part| part.data_contains_sector(abs_sector))
         {
             let group_idx = (abs_sector - partition.data_start_sector) / 64;
-            let abs_group_sector = partition.data_start_sector + group_idx * 64;
             let max_groups = (partition.data_end_sector - partition.data_start_sector).div_ceil(64);
             let request = SectorGroupRequest {
                 group_idx,
                 partition_idx: Some(partition.index as u8),
                 mode: self.mode,
+                force_rehash,
             };
-            (request, abs_group_sector, max_groups)
+            (request, max_groups)
         } else {
             let group_idx = abs_sector / 64;
-            let abs_group_sector = group_idx * 64;
             let max_groups = self.size.div_ceil(SECTOR_GROUP_SIZE as u64) as u32;
-            let request = SectorGroupRequest { group_idx, partition_idx: None, mode: self.mode };
-            (request, abs_group_sector, max_groups)
+            let request = SectorGroupRequest {
+                group_idx,
+                partition_idx: None,
+                mode: self.mode,
+                force_rehash,
+            };
+            (request, max_groups)
         };
 
         // Load sector group
-        let (sector_group, _updated) =
+        let (sector_group, updated) =
             fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
 
+        Ok((sector_group, updated))
+    }
+
+    pub fn fill_buf_internal(&mut self) -> io::Result<Bytes> {
+        let pos = self.pos;
+        let size = self.size;
+        if pos >= size {
+            return Ok(Bytes::new());
+        }
+
+        // Read from modified disc header
+        if pos < size_of::<DiscHeader>() as u64 {
+            if let Some(alt_disc_header) = &self.alt_disc_header {
+                return Ok(Bytes::copy_from_slice(&alt_disc_header.as_bytes()[pos as usize..]));
+            }
+        }
+
+        // Load sector group
+        let abs_sector = (pos / SECTOR_SIZE as u64) as u32;
+        let (sector_group, _updated) = self.load_sector_group(abs_sector, false)?;
+
         // Calculate the number of consecutive sectors in the group
-        let group_sector = abs_sector - abs_group_sector;
+        let group_sector = abs_sector - sector_group.start_sector;
         let consecutive_sectors = sector_group.consecutive_sectors(group_sector);
         if consecutive_sectors == 0 {
             return Ok(Bytes::new());
@@ -355,54 +373,37 @@ impl DiscReader {
         let num_sectors = group_sector + consecutive_sectors;
 
         // Read from sector group buffer
-        let group_start = abs_group_sector as u64 * SECTOR_SIZE as u64;
-        let offset = (self.pos - group_start) as usize;
-        let end = (num_sectors as u64 * SECTOR_SIZE as u64).min(self.size - group_start) as usize;
+        let group_start = sector_group.start_sector as u64 * SECTOR_SIZE as u64;
+        let offset = (pos - group_start) as usize;
+        let end = (num_sectors as u64 * SECTOR_SIZE as u64).min(size - group_start) as usize;
         Ok(sector_group.data.slice(offset..end))
     }
 }
 
 impl BufRead for DiscReader {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        if self.pos >= self.size {
+        let pos = self.pos;
+        let size = self.size;
+        if pos >= size {
             return Ok(&[]);
         }
 
-        // Read from modified disc header
-        if self.pos < size_of::<DiscHeader>() as u64 {
-            if let Some(alt_disc_header) = &self.alt_disc_header {
-                return Ok(&alt_disc_header.as_bytes()[self.pos as usize..]);
+        let mut this = self;
+        polonius!(|this| -> io::Result<&'polonius [u8]> {
+            // Read from modified disc header
+            if pos < size_of::<DiscHeader>() as u64 {
+                if let Some(alt_disc_header) = &this.alt_disc_header {
+                    polonius_return!(Ok(&alt_disc_header.as_bytes()[pos as usize..]));
+                }
             }
-        }
-
-        // Build sector group request
-        let abs_sector = (self.pos / SECTOR_SIZE as u64) as u32;
-        let (request, abs_group_sector, max_groups) = if let Some(partition) =
-            self.orig_partitions().iter().find(|part| part.data_contains_sector(abs_sector))
-        {
-            let group_idx = (abs_sector - partition.data_start_sector) / 64;
-            let abs_group_sector = partition.data_start_sector + group_idx * 64;
-            let max_groups = (partition.data_end_sector - partition.data_start_sector).div_ceil(64);
-            let request = SectorGroupRequest {
-                group_idx,
-                partition_idx: Some(partition.index as u8),
-                mode: self.mode,
-            };
-            (request, abs_group_sector, max_groups)
-        } else {
-            let group_idx = abs_sector / 64;
-            let abs_group_sector = group_idx * 64;
-            let max_groups = self.size.div_ceil(SECTOR_GROUP_SIZE as u64) as u32;
-            let request = SectorGroupRequest { group_idx, partition_idx: None, mode: self.mode };
-            (request, abs_group_sector, max_groups)
-        };
+        });
 
         // Load sector group
-        let (sector_group, _updated) =
-            fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
+        let abs_sector = (pos / SECTOR_SIZE as u64) as u32;
+        let (sector_group, _updated) = this.load_sector_group(abs_sector, false)?;
 
         // Calculate the number of consecutive sectors in the group
-        let group_sector = abs_sector - abs_group_sector;
+        let group_sector = abs_sector - sector_group.start_sector;
         let consecutive_sectors = sector_group.consecutive_sectors(group_sector);
         if consecutive_sectors == 0 {
             return Ok(&[]);
@@ -410,9 +411,9 @@ impl BufRead for DiscReader {
         let num_sectors = group_sector + consecutive_sectors;
 
         // Read from sector group buffer
-        let group_start = abs_group_sector as u64 * SECTOR_SIZE as u64;
-        let offset = (self.pos - group_start) as usize;
-        let end = (num_sectors as u64 * SECTOR_SIZE as u64).min(self.size - group_start) as usize;
+        let group_start = sector_group.start_sector as u64 * SECTOR_SIZE as u64;
+        let offset = (pos - group_start) as usize;
+        let end = (num_sectors as u64 * SECTOR_SIZE as u64).min(size - group_start) as usize;
         Ok(&sector_group.data[offset..end])
     }
 
@@ -490,37 +491,43 @@ fn read_partition_info(
                 data_start_sector,
                 key,
             });
-            let raw_boot: Arc<[u8; BOOT_SIZE]> =
-                read_arc(reader).context("Reading partition headers")?;
+            let raw_boot: Arc<[u8; BOOT_SIZE]> = read_arc(reader).context("Reading boot data")?;
             let partition_disc_header =
-                DiscHeader::ref_from_bytes(&raw_boot[..size_of::<DiscHeader>()])
+                DiscHeader::ref_from_bytes(array_ref![raw_boot, 0, size_of::<DiscHeader>()])
                     .expect("Invalid disc header alignment");
-            let partition_header =
-                PartitionHeader::ref_from_bytes(&raw_boot[size_of::<DiscHeader>()..])
-                    .expect("Invalid partition header alignment");
+            let boot_header = BootHeader::ref_from_bytes(&raw_boot[BB2_OFFSET..])
+                .expect("Invalid boot header alignment");
             let raw_fst = if partition_disc_header.is_wii() {
-                let raw_fst = read_fst(reader, partition_header, true)?;
-                let fst = Fst::new(&raw_fst)?;
-                let max_fst_offset = fst
-                    .nodes
-                    .iter()
-                    .filter_map(|n| match n.kind() {
-                        NodeKind::File => Some(n.offset(true) + n.length() as u64),
-                        _ => None,
-                    })
-                    .max()
-                    .unwrap_or(0);
-                if max_fst_offset > data_size {
-                    if data_size == 0 {
-                        // Guess data size for decrypted partitions
-                        data_end_sector = max_fst_offset.div_ceil(SECTOR_SIZE as u64) as u32;
-                    } else {
-                        return Err(Error::DiscFormat(format!(
-                            "Partition {group_idx}:{part_idx} FST exceeds data size",
-                        )));
+                let raw_fst = read_fst(reader, boot_header, true)?;
+                match Fst::new(&raw_fst) {
+                    Ok(fst) => {
+                        let max_fst_offset = fst
+                            .nodes
+                            .iter()
+                            .filter_map(|n| match n.kind() {
+                                NodeKind::File => Some(n.offset(true) + n.length() as u64),
+                                _ => None,
+                            })
+                            .max()
+                            .unwrap_or(0);
+                        if max_fst_offset > data_size {
+                            if data_size == 0 {
+                                // Guess data size for decrypted partitions
+                                data_end_sector =
+                                    max_fst_offset.div_ceil(SECTOR_SIZE as u64) as u32;
+                            } else {
+                                return Err(Error::DiscFormat(format!(
+                                    "Partition {group_idx}:{part_idx} FST exceeds data size",
+                                )));
+                            }
+                        }
+                        Some(raw_fst)
+                    }
+                    Err(e) => {
+                        warn!("Partition {group_idx}:{part_idx} FST is not valid: {e}");
+                        None
                     }
                 }
-                Some(raw_fst)
             } else {
                 warn!("Partition {group_idx}:{part_idx} is not valid");
                 None

@@ -11,11 +11,11 @@ use zerocopy::{FromZeros, IntoBytes};
 use crate::{
     disc::{
         fst::{Fst, FstBuilder},
-        DiscHeader, PartitionHeader, BI2_SIZE, BOOT_SIZE, GCN_MAGIC, MINI_DVD_SIZE, SECTOR_SIZE,
+        BootHeader, DiscHeader, BI2_SIZE, BOOT_SIZE, GCN_MAGIC, MINI_DVD_SIZE, SECTOR_SIZE,
         WII_MAGIC,
     },
     read::DiscStream,
-    util::{align_up_64, array_ref, array_ref_mut, lfg::LaggedFibonacci},
+    util::{array_ref, array_ref_mut, lfg::LaggedFibonacci, Align},
     Error, Result, ResultContext,
 };
 
@@ -33,7 +33,7 @@ pub struct FileInfo {
 
 pub struct GCPartitionBuilder {
     disc_header: Box<DiscHeader>,
-    partition_header: Box<PartitionHeader>,
+    boot_header: Box<BootHeader>,
     user_files: Vec<FileInfo>,
     overrides: PartitionOverrides,
     junk_files: Vec<String>,
@@ -97,7 +97,7 @@ impl GCPartitionBuilder {
         }
         Self {
             disc_header,
-            partition_header: PartitionHeader::new_box_zeroed().unwrap(),
+            boot_header: BootHeader::new_box_zeroed().unwrap(),
             user_files: Vec::new(),
             overrides,
             junk_files: Vec::new(),
@@ -110,8 +110,8 @@ impl GCPartitionBuilder {
     }
 
     #[inline]
-    pub fn set_partition_header(&mut self, partition_header: Box<PartitionHeader>) {
-        self.partition_header = partition_header;
+    pub fn set_boot_header(&mut self, boot_header: Box<BootHeader>) {
+        self.boot_header = boot_header;
     }
 
     pub fn add_file(&mut self, info: FileInfo) -> Result<()> {
@@ -139,8 +139,8 @@ impl GCPartitionBuilder {
         layout.locate_sys_files(sys_file_callback)?;
         layout.apply_overrides(&self.overrides)?;
         let write_info = layout.layout_files()?;
-        let disc_size = layout.partition_header.user_offset.get() as u64
-            + layout.partition_header.user_size.get() as u64;
+        let disc_size =
+            layout.boot_header.user_offset.get() as u64 + layout.boot_header.user_size.get() as u64;
         let junk_id = layout.junk_id();
         Ok(GCPartitionWriter::new(write_info, disc_size, junk_id, self.disc_header.disc_num))
     }
@@ -148,7 +148,7 @@ impl GCPartitionBuilder {
 
 struct GCPartitionLayout {
     disc_header: Box<DiscHeader>,
-    partition_header: Box<PartitionHeader>,
+    boot_header: Box<BootHeader>,
     user_files: Vec<FileInfo>,
     apploader_file: Option<FileInfo>,
     dol_file: Option<FileInfo>,
@@ -162,7 +162,7 @@ impl GCPartitionLayout {
     fn new(builder: &GCPartitionBuilder) -> Self {
         GCPartitionLayout {
             disc_header: builder.disc_header.clone(),
-            partition_header: builder.partition_header.clone(),
+            boot_header: builder.boot_header.clone(),
             user_files: builder.user_files.clone(),
             apploader_file: None,
             dol_file: None,
@@ -194,9 +194,7 @@ impl GCPartitionLayout {
                     )));
                 }
                 self.disc_header.as_mut_bytes().copy_from_slice(&data[..size_of::<DiscHeader>()]);
-                self.partition_header
-                    .as_mut_bytes()
-                    .copy_from_slice(&data[size_of::<DiscHeader>()..]);
+                self.boot_header.as_mut_bytes().copy_from_slice(&data[size_of::<DiscHeader>()..]);
                 *handled = true;
                 continue;
             }
@@ -228,7 +226,7 @@ impl GCPartitionLayout {
         // Locate other system files
         let is_wii = self.disc_header.is_wii();
         for (info, handled) in self.user_files.iter().zip(handled.iter_mut()) {
-            let dol_offset = self.partition_header.dol_offset(is_wii);
+            let dol_offset = self.boot_header.dol_offset(is_wii);
             if (dol_offset != 0 && info.offset == Some(dol_offset)) || info.name == "sys/main.dol" {
                 let mut info = info.clone();
                 if info.alignment.is_none() {
@@ -239,7 +237,7 @@ impl GCPartitionLayout {
                 continue;
             }
 
-            let fst_offset = self.partition_header.fst_offset(is_wii);
+            let fst_offset = self.boot_header.fst_offset(is_wii);
             if (fst_offset != 0 && info.offset == Some(fst_offset)) || info.name == "sys/fst.bin" {
                 let mut data = Vec::with_capacity(info.size as usize);
                 file_callback(&mut data, &info.name)
@@ -293,7 +291,7 @@ impl GCPartitionLayout {
         if let Some(audio_stream_buf_size) = overrides.audio_stream_buf_size {
             self.disc_header.audio_stream_buf_size = audio_stream_buf_size;
         }
-        let set_bi2 = self.raw_bi2.is_none() && overrides.region.is_some();
+        let set_bi2 = self.raw_bi2.is_none() || overrides.region.is_some();
         let raw_bi2 = self.raw_bi2.get_or_insert_with(|| {
             <[u8]>::new_box_zeroed_with_elems(BI2_SIZE).expect("Failed to allocate BI2")
         });
@@ -383,11 +381,11 @@ impl GCPartitionLayout {
             }
         }
         let raw_fst = builder.finalize();
-        if raw_fst.len() != self.partition_header.fst_size(is_wii) as usize {
+        if raw_fst.len() != self.boot_header.fst_size(is_wii) as usize {
             return Err(Error::Other(format!(
                 "FST size mismatch: {} != {}",
                 raw_fst.len(),
-                self.partition_header.fst_size(is_wii)
+                self.boot_header.fst_size(is_wii)
             )));
         }
         Ok(Arc::from(raw_fst))
@@ -411,7 +409,7 @@ impl GCPartitionLayout {
 
         let mut boot = <[u8]>::new_box_zeroed_with_elems(BOOT_SIZE)?;
         boot[..size_of::<DiscHeader>()].copy_from_slice(self.disc_header.as_bytes());
-        boot[size_of::<DiscHeader>()..].copy_from_slice(self.partition_header.as_bytes());
+        boot[size_of::<DiscHeader>()..].copy_from_slice(self.boot_header.as_bytes());
         write_info.push(WriteInfo {
             kind: WriteKind::Static(Arc::from(boot), "[BOOT]"),
             size: BOOT_SIZE as u64,
@@ -433,21 +431,21 @@ impl GCPartitionLayout {
 
         // Update DOL and FST offsets if not set
         let is_wii = self.disc_header.is_wii();
-        let mut dol_offset = self.partition_header.dol_offset(is_wii);
+        let mut dol_offset = self.boot_header.dol_offset(is_wii);
         if dol_offset == 0 {
-            dol_offset = align_up_64(last_offset, dol_file.alignment.unwrap() as u64);
-            self.partition_header.set_dol_offset(dol_offset, is_wii);
+            dol_offset = last_offset.align_up(dol_file.alignment.unwrap() as u64);
+            self.boot_header.set_dol_offset(dol_offset, is_wii);
         }
-        let mut fst_offset = self.partition_header.fst_offset(is_wii);
+        let mut fst_offset = self.boot_header.fst_offset(is_wii);
         if fst_offset == 0 {
             // TODO handle DOL in user data
-            fst_offset = align_up_64(dol_offset + dol_file.size, 128);
-            self.partition_header.set_fst_offset(fst_offset, is_wii);
+            fst_offset = (dol_offset + dol_file.size).align_up(128);
+            self.boot_header.set_fst_offset(fst_offset, is_wii);
         }
         let fst_size = self.calculate_fst_size()?;
-        self.partition_header.set_fst_size(fst_size, is_wii);
-        if self.partition_header.fst_max_size(is_wii) < fst_size {
-            self.partition_header.set_fst_max_size(fst_size, is_wii);
+        self.boot_header.set_fst_size(fst_size, is_wii);
+        if self.boot_header.fst_max_size(is_wii) < fst_size {
+            self.boot_header.set_fst_max_size(fst_size, is_wii);
         }
 
         if dol_offset < fst_offset {
@@ -474,10 +472,10 @@ impl GCPartitionLayout {
         let mut last_offset = self.layout_system_data(&mut system_write_info)?;
 
         // Layout user data
-        let mut user_offset = self.partition_header.user_offset.get() as u64;
+        let mut user_offset = self.boot_header.user_offset.get() as u64;
         if user_offset == 0 {
-            user_offset = align_up_64(last_offset, SECTOR_SIZE as u64);
-            self.partition_header.user_offset.set(user_offset as u32);
+            user_offset = last_offset.align_up(SECTOR_SIZE as u64);
+            self.boot_header.user_offset.set(user_offset as u32);
         } else if user_offset < last_offset {
             return Err(Error::Other(format!(
                 "User offset {:#X} is before FST {:#X}",
@@ -488,7 +486,7 @@ impl GCPartitionLayout {
         for info in &self.user_files {
             let offset = info
                 .offset
-                .unwrap_or_else(|| align_up_64(last_offset, info.alignment.unwrap_or(32) as u64));
+                .unwrap_or_else(|| last_offset.align_up(info.alignment.unwrap_or(32) as u64));
             write_info.push(WriteInfo {
                 kind: WriteKind::File(info.name.clone()),
                 offset,
@@ -504,7 +502,7 @@ impl GCPartitionLayout {
         write_info.push(WriteInfo {
             kind: WriteKind::Static(fst_data, "[FST]"),
             size: fst_size,
-            offset: self.partition_header.fst_offset(is_wii),
+            offset: self.boot_header.fst_offset(is_wii),
         });
         // Add system files to write info
         write_info.extend(system_write_info);
@@ -512,17 +510,17 @@ impl GCPartitionLayout {
         sort_files(&mut write_info)?;
 
         // Update user size if not set
-        if self.partition_header.user_size.get() == 0 {
+        if self.boot_header.user_size.get() == 0 {
             let user_end = if self.disc_header.is_wii() {
-                align_up_64(last_offset, SECTOR_SIZE as u64)
+                last_offset.align_up(SECTOR_SIZE as u64)
             } else {
                 MINI_DVD_SIZE
             };
-            self.partition_header.user_size.set((user_end - user_offset) as u32);
+            self.boot_header.user_size.set((user_end - user_offset) as u32);
         }
 
         // Insert junk data
-        let write_info = insert_junk_data(write_info, &self.partition_header);
+        let write_info = insert_junk_data(write_info, &self.boot_header);
 
         Ok(write_info)
     }
@@ -534,11 +532,11 @@ impl GCPartitionLayout {
 
 pub(crate) fn insert_junk_data(
     write_info: Vec<WriteInfo>,
-    partition_header: &PartitionHeader,
+    boot_header: &BootHeader,
 ) -> Vec<WriteInfo> {
     let mut new_write_info = Vec::with_capacity(write_info.len());
 
-    let fst_end = partition_header.fst_offset(false) + partition_header.fst_size(false);
+    let fst_end = boot_header.fst_offset(false) + boot_header.fst_size(false);
     let file_gap = find_file_gap(&write_info, fst_end);
     let mut last_file_end = 0;
     for info in write_info {
@@ -550,7 +548,7 @@ pub(crate) fn insert_junk_data(
                 // FST, and the junk data in between the inner and outer rim files. This attempts to
                 // determine the correct alignment, but is not 100% accurate.
                 let junk_start = if file_gap == Some(last_file_end) {
-                    align_up_64(last_file_end, 4)
+                    last_file_end.align_up(4)
                 } else {
                     aligned_end
                 };
@@ -565,8 +563,7 @@ pub(crate) fn insert_junk_data(
         new_write_info.push(info);
     }
     let aligned_end = gcm_align(last_file_end);
-    let user_end =
-        partition_header.user_offset.get() as u64 + partition_header.user_size.get() as u64;
+    let user_end = boot_header.user_offset.get() as u64 + boot_header.user_size.get() as u64;
     if aligned_end < user_end && aligned_end >= fst_end {
         new_write_info.push(WriteInfo {
             kind: WriteKind::Junk,

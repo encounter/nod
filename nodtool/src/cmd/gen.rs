@@ -13,7 +13,8 @@ use nod::{
     build::gc::{FileCallback, FileInfo, GCPartitionBuilder, PartitionOverrides},
     common::PartitionKind,
     disc::{
-        fst::Fst, DiscHeader, PartitionHeader, BI2_SIZE, BOOT_SIZE, MINI_DVD_SIZE, SECTOR_SIZE,
+        fst::Fst, BootHeader, DiscHeader, BB2_OFFSET, BI2_SIZE, BOOT_SIZE, MINI_DVD_SIZE,
+        SECTOR_SIZE,
     },
     read::{
         DiscOptions, DiscReader, PartitionEncryption, PartitionMeta, PartitionOptions,
@@ -114,11 +115,12 @@ pub fn run(args: Args) -> nod::Result<()> {
     // Build metadata
     let mut file_infos = Vec::new();
     let boot_data: Box<[u8; BOOT_SIZE]> = read_fixed(&boot_path)?;
-    let header = DiscHeader::ref_from_bytes(&boot_data[..size_of::<DiscHeader>()])
+    let header = DiscHeader::ref_from_bytes(array_ref![boot_data, 0, size_of::<DiscHeader>()])
         .expect("Failed to read disc header");
     let junk_id = get_junk_id(header);
-    let partition_header = PartitionHeader::ref_from_bytes(&boot_data[size_of::<DiscHeader>()..])
-        .expect("Failed to read partition header");
+    let boot_header =
+        BootHeader::ref_from_bytes(array_ref![boot_data, BB2_OFFSET, size_of::<BootHeader>()])
+            .expect("Failed to read boot header");
     let fst_path = args.dir.join("sys/fst.bin");
     let fst_data = read_all(&fst_path)?;
     let fst = Fst::new(&fst_data).expect("Failed to parse FST");
@@ -138,8 +140,8 @@ pub fn run(args: Args) -> nod::Result<()> {
         offset: BOOT_SIZE as u64 + BI2_SIZE as u64,
         length: apploader_size,
     });
-    let fst_offset = partition_header.fst_offset(false);
-    let dol_offset = partition_header.dol_offset(false);
+    let fst_offset = boot_header.fst_offset(false);
+    let dol_offset = boot_header.dol_offset(false);
     if dol_offset < fst_offset {
         file_infos.push(FileWriteInfo {
             name: "sys/main.dol".to_string(),
@@ -162,7 +164,7 @@ pub fn run(args: Args) -> nod::Result<()> {
             return Err(nod::Error::DiscFormat("DOL not found in FST".to_string()));
         }
     }
-    let fst_size = partition_header.fst_size(false);
+    let fst_size = boot_header.fst_size(false);
     file_infos.push(FileWriteInfo {
         name: "sys/fst.bin".to_string(),
         offset: fst_offset,
@@ -213,21 +215,15 @@ pub fn run(args: Args) -> nod::Result<()> {
     let mut out = File::create(&args.out)
         .with_context(|| format!("Failed to create {}", args.out.display()))?;
     info!("Writing disc image to {} ({} files)", args.out.display(), file_infos.len());
-    let crc = write_files(
-        &mut out,
-        &file_infos,
-        header,
-        partition_header,
-        junk_id,
-        |out, name| match name {
+    let crc =
+        write_files(&mut out, &file_infos, header, boot_header, junk_id, |out, name| match name {
             "sys/boot.bin" => out.write_all(boot_data.as_ref()),
             "sys/fst.bin" => out.write_all(fst_data.as_ref()),
             path => {
                 let mut in_file = File::open(args.dir.join(path))?;
                 io::copy(&mut in_file, out).map(|_| ())
             }
-        },
-    )?;
+        })?;
     out.flush().context("Failed to flush output file")?;
     info!("Generated disc image in {:?} (CRC32: {:08X})", start.elapsed(), crc);
     let redump_entry = redump::find_by_crc32(crc);
@@ -265,14 +261,14 @@ fn write_files<W>(
     w: &mut W,
     file_infos: &[FileWriteInfo],
     header: &DiscHeader,
-    partition_header: &PartitionHeader,
+    boot_header: &BootHeader,
     junk_id: Option<[u8; 4]>,
     mut callback: impl FnMut(&mut HashStream<&mut W>, &str) -> io::Result<()>,
 ) -> nod::Result<u32>
 where
     W: Write + ?Sized,
 {
-    let fst_end = partition_header.fst_offset(false) + partition_header.fst_size(false);
+    let fst_end = boot_header.fst_offset(false) + boot_header.fst_size(false);
     let file_gap = find_file_gap(file_infos, fst_end);
     let mut lfg = LaggedFibonacci::default();
     let mut out = HashStream::new(w);
@@ -461,9 +457,9 @@ fn in_memory_test(
 
     // Build metadata
     let mut file_infos = Vec::new();
-    let header = meta.header();
+    let header = meta.disc_header();
     let junk_id = get_junk_id(header);
-    let partition_header = meta.partition_header();
+    let boot_header = meta.boot_header();
     let fst = meta.fst()?;
 
     file_infos.push(FileWriteInfo {
@@ -481,8 +477,8 @@ fn in_memory_test(
         offset: BOOT_SIZE as u64 + BI2_SIZE as u64,
         length: meta.raw_apploader.len() as u64,
     });
-    let fst_offset = partition_header.fst_offset(false);
-    let dol_offset = partition_header.dol_offset(false);
+    let fst_offset = boot_header.fst_offset(false);
+    let dol_offset = boot_header.dol_offset(false);
     if dol_offset < fst_offset {
         file_infos.push(FileWriteInfo {
             name: "sys/main.dol".to_string(),
@@ -505,7 +501,7 @@ fn in_memory_test(
             return Err(nod::Error::Other("DOL not found in FST".to_string()));
         }
     }
-    let fst_size = partition_header.fst_size(false);
+    let fst_size = boot_header.fst_size(false);
     file_infos.push(FileWriteInfo {
         name: "sys/fst.bin".to_string(),
         offset: fst_offset,

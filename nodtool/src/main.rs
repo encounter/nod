@@ -145,8 +145,10 @@ fn main() {
     result = result.and_then(|_| run(args.command));
     if let Err(e) = result {
         eprintln!("Failed: {}", e);
-        if let Some(source) = e.source() {
-            eprintln!("Caused by: {}", source);
+        let mut source = e.source();
+        while let Some(e) = source {
+            eprintln!("Caused by: {}", e);
+            source = e.source();
         }
         std::process::exit(1);
     }

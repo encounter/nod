@@ -6,8 +6,10 @@ use zerocopy::FromBytes;
 
 use crate::{
     disc::{
-        fst::Fst, wii::WiiPartitionHeader, DiscHeader, PartitionHeader, BOOT_SIZE, SECTOR_SIZE,
+        fst::Fst, wii::WiiPartitionHeader, BootHeader, DebugHeader, DiscHeader, BB2_OFFSET,
+        BOOT_SIZE, SECTOR_SIZE,
     },
+    util::array_ref,
     Error, Result,
 };
 
@@ -308,7 +310,7 @@ pub struct PartitionInfo {
     pub has_encryption: bool,
     /// Whether the partition data hashes are present
     pub has_hashes: bool,
-    /// Disc and partition header (boot.bin)
+    /// Disc and boot header (boot.bin)
     pub raw_boot: Arc<[u8; BOOT_SIZE]>,
     /// File system table (fst.bin), or `None` if partition is invalid
     pub raw_fst: Option<Arc<[u8]>>,
@@ -330,15 +332,26 @@ impl PartitionInfo {
     /// A view into the disc header.
     #[inline]
     pub fn disc_header(&self) -> &DiscHeader {
-        DiscHeader::ref_from_bytes(&self.raw_boot[..size_of::<DiscHeader>()])
+        DiscHeader::ref_from_bytes(array_ref![self.raw_boot, 0, size_of::<DiscHeader>()])
             .expect("Invalid disc header alignment")
     }
 
-    /// A view into the partition header.
+    /// A view into the debug header.
     #[inline]
-    pub fn partition_header(&self) -> &PartitionHeader {
-        PartitionHeader::ref_from_bytes(&self.raw_boot[size_of::<DiscHeader>()..])
-            .expect("Invalid partition header alignment")
+    pub fn debug_header(&self) -> &DebugHeader {
+        DebugHeader::ref_from_bytes(array_ref![
+            self.raw_boot,
+            size_of::<DiscHeader>(),
+            size_of::<DebugHeader>()
+        ])
+        .expect("Invalid debug header alignment")
+    }
+
+    /// A view into the boot header.
+    #[inline]
+    pub fn boot_header(&self) -> &BootHeader {
+        BootHeader::ref_from_bytes(array_ref![self.raw_boot, BB2_OFFSET, size_of::<BootHeader>()])
+            .expect("Invalid boot header alignment")
     }
 
     /// A view into the file system table (FST).

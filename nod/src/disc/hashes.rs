@@ -42,7 +42,10 @@ impl GroupHashes {
 pub const NUM_H0_HASHES: usize = SECTOR_DATA_SIZE / HASHES_SIZE;
 
 #[instrument(skip_all)]
-pub fn hash_sector_group(sector_group: &[u8; SECTOR_GROUP_SIZE]) -> Box<GroupHashes> {
+pub fn hash_sector_group(
+    sector_group: &[u8; SECTOR_GROUP_SIZE],
+    ignore_existing: bool,
+) -> Box<GroupHashes> {
     let mut result = GroupHashes::new_box_zeroed().unwrap();
     for (h2_index, h2_hash) in result.h2_hashes.iter_mut().enumerate() {
         let out_h1_hashes = array_ref_mut![result.h1_hashes, h2_index * 8, 8];
@@ -50,7 +53,9 @@ pub fn hash_sector_group(sector_group: &[u8; SECTOR_GROUP_SIZE]) -> Box<GroupHas
             let sector = h1_index + h2_index * 8;
             let out_h0_hashes =
                 array_ref_mut![result.h0_hashes, sector * NUM_H0_HASHES, NUM_H0_HASHES];
-            if array_ref![sector_group, sector * SECTOR_SIZE, 20].iter().any(|&v| v != 0) {
+            if !ignore_existing
+                && array_ref![sector_group, sector * SECTOR_SIZE, 20].iter().any(|&v| v != 0)
+            {
                 // Hash block already present, use it
                 out_h0_hashes.as_mut_bytes().copy_from_slice(array_ref![
                     sector_group,
