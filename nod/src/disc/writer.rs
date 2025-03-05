@@ -215,23 +215,14 @@ pub(crate) fn check_block(
         p.has_hashes && start_sector >= p.data_start_sector && end_sector < p.data_end_sector
     }) {
         if input_position % SECTOR_SIZE as u64 != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Partition block not aligned to sector boundary",
-            ));
+            return Err(io::Error::other("Partition block not aligned to sector boundary"));
         }
         if buf.len() % SECTOR_SIZE != 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Partition block not a multiple of sector size",
-            ));
+            return Err(io::Error::other("Partition block not a multiple of sector size"));
         }
         let block = if partition.has_encryption {
             if decrypted_block.len() < buf.len() {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Decrypted block buffer too small",
-                ));
+                return Err(io::Error::other("Decrypted block buffer too small"));
             }
             for i in 0..buf.len() / SECTOR_SIZE {
                 decrypt_sector_b2b(

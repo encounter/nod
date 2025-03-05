@@ -191,15 +191,12 @@ impl Block {
     /// Returns an error if the block does not contain the specified sector.
     pub fn ensure_contains(&self, sector: u32) -> io::Result<()> {
         if !self.contains(sector) {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "Sector {} not in block range {}-{}",
-                    sector,
-                    self.sector,
-                    self.sector + self.count
-                ),
-            ));
+            return Err(io::Error::other(format!(
+                "Sector {} not in block range {}-{}",
+                sector,
+                self.sector,
+                self.sector + self.count
+            )));
         }
         Ok(())
     }

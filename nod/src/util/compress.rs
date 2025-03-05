@@ -332,10 +332,7 @@ impl Compressor {
                 }
             }
             #[allow(unreachable_patterns)] // if compression is disabled
-            _ => Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Unsupported compression: {:?}", self.kind),
-            )),
+            _ => Err(io::Error::other(format!("Unsupported compression: {:?}", self.kind))),
         }
     }
 }
@@ -507,7 +504,6 @@ mod zstd_util {
     use std::io;
 
     pub fn map_error_code(code: usize) -> io::Error {
-        let msg = zstd_safe::get_error_name(code);
-        io::Error::new(io::ErrorKind::Other, msg.to_string())
+        io::Error::other(zstd_safe::get_error_name(code))
     }
 }

@@ -324,9 +324,8 @@ impl Preloader {
     }
 }
 
-fn map_poisoned<T>(_: std::sync::PoisonError<T>) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, "Mutex poisoned")
-}
+#[inline]
+fn map_poisoned<T>(_: std::sync::PoisonError<T>) -> io::Error { io::Error::other("Mutex poisoned") }
 
 pub struct SectorGroupLoader {
     io: Box<dyn BlockReader>,

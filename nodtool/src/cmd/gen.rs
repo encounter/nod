@@ -623,7 +623,7 @@ impl FileCallback for PartitionFileReader {
             "sys/apploader.img" => self.meta.raw_apploader.as_ref(),
             "sys/main.dol" => self.meta.raw_dol.as_ref(),
             path => {
-                let fst = self.meta.fst().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                let fst = self.meta.fst().map_err(io::Error::other)?;
                 let Some((_, node)) = fst.find(path) else {
                     return Err(io::Error::new(
                         io::ErrorKind::NotFound,

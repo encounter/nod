@@ -185,7 +185,7 @@ impl FileCallbackTGC {
 
 impl FileCallback for FileCallbackTGC {
     fn read_file(&mut self, out: &mut [u8], name: &str, offset: u64) -> io::Result<()> {
-        let fst = Fst::new(&self.fst).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let fst = Fst::new(&self.fst).map_err(io::Error::other)?;
         let (_, node) = fst.find(name).ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, format!("File not found in FST: {}", name))
         })?;

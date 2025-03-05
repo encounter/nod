@@ -51,7 +51,7 @@ impl LaggedFibonacci {
         // Instead of doing the "shift by 18 instead of 16" oddity when actually outputting the data,
         // we can do the shifting (and byteswapping) at this point to make the output code simpler.
         for x in self.buffer.iter_mut() {
-            *x = ((*x & 0xFF00FFFF) | (*x >> 2 & 0x00FF0000)).to_be();
+            *x = ((*x & 0xFF00FFFF) | ((*x >> 2) & 0x00FF0000)).to_be();
         }
         for _ in 0..4 {
             self.forward();
@@ -74,7 +74,7 @@ impl LaggedFibonacci {
                 *v = (*v >> 1) | (n & 0x80000000);
             }
         }
-        out[16] ^= out[0] >> 9 ^ out[16] << 23;
+        out[16] ^= (out[0] >> 9) ^ (out[16] << 23);
     }
 
     /// Same as [`generate_seed`], but ensures the resulting seed is big-endian.

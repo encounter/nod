@@ -939,7 +939,7 @@ impl BlockReader for BlockReaderWIA {
             decompressed.copy_to_slice(&mut out[..info.size as usize]);
         }
         if !decompressed.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::Other, "Failed to consume all group data"));
+            return Err(io::Error::other("Failed to consume all group data"));
         }
 
         // Read first 0x80 bytes from disc header
@@ -1112,10 +1112,7 @@ impl BlockProcessor for BlockProcessorWIA {
             self.raw_data.as_ref(),
         )
         .ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Couldn't find partition or raw data for group {}", group_idx),
-            )
+            io::Error::other(format!("Couldn't find partition or raw data for group {}", group_idx))
         })?;
 
         self.inner.seek(SeekFrom::Start(info.sector as u64 * SECTOR_SIZE as u64))?;
@@ -1126,10 +1123,7 @@ impl BlockProcessor for BlockProcessorWIA {
         let chunk_size = self.disc.chunk_size.get() as u64;
         let (mut group_data, hash_exception_data) = if info.in_partition {
             if info.size % SECTOR_DATA_SIZE as u32 != 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Partition group size not aligned to sector",
-                ));
+                return Err(io::Error::other("Partition group size not aligned to sector"));
             }
 
             let mut buf = BytesMut::zeroed(info.size as usize);
@@ -1198,9 +1192,11 @@ impl BlockProcessor for BlockProcessorWIA {
             let mut buf = BytesMut::with_capacity(hash_exception_data.len() + group_data.len());
             buf.put_slice(hash_exception_data.as_ref());
             buf.put_slice(group_data.as_ref());
-            if self.compressor.compress(buf.as_ref()).map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("Failed to compress group: {}", e))
-            })? {
+            if self
+                .compressor
+                .compress(buf.as_ref())
+                .map_err(|e| io::Error::other(format!("Failed to compress group: {}", e)))?
+            {
                 let compressed_size = self.compressor.buffer.len() as u32;
                 // For WIA, we must always store compressed data.
                 // For RVZ, only store compressed data if it's smaller than uncompressed.
@@ -1220,15 +1216,12 @@ impl BlockProcessor for BlockProcessorWIA {
                     });
                 }
             } else if !is_rvz {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "Failed to compress group {}: len {}, capacity {}",
-                        group_idx,
-                        self.compressor.buffer.len(),
-                        self.compressor.buffer.capacity()
-                    ),
-                ));
+                return Err(io::Error::other(format!(
+                    "Failed to compress group {}: len {}, capacity {}",
+                    group_idx,
+                    self.compressor.buffer.len(),
+                    self.compressor.buffer.capacity()
+                )));
             }
         }
 
