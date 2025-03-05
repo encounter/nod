@@ -3,10 +3,11 @@ use std::{fs, io, io::Read, path::Path};
 use dyn_clone::DynClone;
 
 use crate::{
+    Error, Result, ResultContext,
     common::{Format, KeyBytes, MagicBytes, PartitionInfo},
     disc::{
-        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         DiscHeader, GCN_MAGIC, SECTOR_SIZE, WII_MAGIC,
+        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
     },
     io::{
         split::SplitFileReader,
@@ -14,7 +15,6 @@ use crate::{
     },
     read::{DiscMeta, DiscStream},
     util::{aes::decrypt_sector, array_ref, array_ref_mut, lfg::LaggedFibonacci, read::read_from},
-    Error, Result, ResultContext,
 };
 
 /// Block reader trait for reading disc images.
@@ -45,7 +45,7 @@ pub fn new(mut stream: Box<dyn DiscStream>) -> Result<Box<dyn BlockReader>> {
             return Err(Error::DiscFormat("GCZ support is disabled".to_string()));
         }
         Some(Format::Nfs) => {
-            return Err(Error::DiscFormat("NFS requires a filesystem path".to_string()))
+            return Err(Error::DiscFormat("NFS requires a filesystem path".to_string()));
         }
         Some(Format::Wbfs) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
         Some(Format::Wia | Format::Rvz) => crate::io::wia::BlockReaderWIA::new(stream)?,

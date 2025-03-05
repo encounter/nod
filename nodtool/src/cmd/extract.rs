@@ -7,10 +7,10 @@ use std::{
 
 use argp::FromArgs;
 use nod::{
+    ResultContext,
     common::PartitionKind,
     disc::fst::{Fst, Node},
     read::{DiscOptions, DiscReader, PartitionMeta, PartitionOptions, PartitionReader},
-    ResultContext,
 };
 use size::{Base, Size};
 use zerocopy::IntoBytes;

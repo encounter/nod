@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{hash_map::Entry, BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, hash_map::Entry},
     io,
     io::{Read, Seek, SeekFrom},
     mem::size_of,
@@ -10,16 +10,17 @@ use std::{
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tracing::{debug, instrument, warn};
-use zerocopy::{big_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, big_endian::*};
 
 use crate::{
+    Error, IoResultContext, Result, ResultContext,
     common::{Compression, Format, HashBytes, KeyBytes, MagicBytes},
     disc::{
+        BootHeader, DiscHeader, SECTOR_SIZE,
         fst::Fst,
         reader::DiscReader,
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
-        writer::{par_process, read_block, BlockProcessor, BlockResult, DataCallback, DiscWriter},
-        BootHeader, DiscHeader, SECTOR_SIZE,
+        writer::{BlockProcessor, BlockResult, DataCallback, DiscWriter, par_process, read_block},
     },
     io::{
         block::{Block, BlockKind, BlockReader, RVZ_MAGIC, WIA_MAGIC},
@@ -27,16 +28,16 @@ use crate::{
     },
     read::{DiscMeta, DiscStream},
     util::{
+        Align,
         aes::decrypt_sector_data_b2b,
         array_ref, array_ref_mut,
         compress::{Compressor, DecompressionKind, Decompressor},
-        digest::{sha1_hash, xxh64_hash, DigestManager},
+        digest::{DigestManager, sha1_hash, xxh64_hash},
         lfg::{LaggedFibonacci, SEED_SIZE, SEED_SIZE_BYTES},
         read::{read_arc_slice, read_from, read_vec},
-        static_assert, Align,
+        static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
-    Error, IoResultContext, Result, ResultContext,
 };
 
 const WIA_VERSION: u32 = 0x01000000;
@@ -1492,7 +1493,7 @@ impl DiscWriterWIA {
                 return Err(Error::Other(format!(
                     "Unsupported compression for WIA/RVZ: {}",
                     options.compression
-                )))
+                )));
             }
         };
         let compr_data = compr_data(options.compression).context("Building compression data")?;

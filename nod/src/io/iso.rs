@@ -4,17 +4,17 @@ use std::{
 };
 
 use crate::{
+    Result, ResultContext,
     common::Format,
     disc::{
+        SECTOR_SIZE,
         reader::DiscReader,
         writer::{DataCallback, DiscWriter},
-        SECTOR_SIZE,
     },
     io::block::{Block, BlockKind, BlockReader},
     read::{DiscMeta, DiscStream},
     util::digest::DigestManager,
     write::{DiscFinalization, DiscWriterWeight, ProcessOptions},
-    Result, ResultContext,
 };
 
 #[derive(Clone)]

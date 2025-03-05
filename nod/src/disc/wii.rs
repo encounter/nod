@@ -8,14 +8,15 @@ use std::{
     sync::Arc,
 };
 
-use zerocopy::{big_endian::*, FromBytes, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, big_endian::*};
 
 use crate::{
+    Error, Result, ResultContext,
     common::{HashBytes, KeyBytes, PartitionInfo},
     disc::{
-        gcn::{read_part_meta, PartitionReaderGC},
-        preloader::{fetch_sector_group, Preloader, SectorGroup, SectorGroupRequest},
         SECTOR_GROUP_SIZE, SECTOR_SIZE,
+        gcn::{PartitionReaderGC, read_part_meta},
+        preloader::{Preloader, SectorGroup, SectorGroupRequest, fetch_sector_group},
     },
     io::block::BlockReader,
     read::{PartitionEncryption, PartitionMeta, PartitionOptions, PartitionReader},
@@ -27,7 +28,6 @@ use crate::{
         read::{read_arc, read_arc_slice},
         static_assert,
     },
-    Error, Result, ResultContext,
 };
 
 /// Size in bytes of the hashes block in a Wii disc sector

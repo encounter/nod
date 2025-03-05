@@ -2,7 +2,7 @@
 
 use std::{ffi::CStr, str::from_utf8};
 
-use zerocopy::{big_endian::*, FromBytes, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, big_endian::*};
 
 use crate::{common::MagicBytes, util::static_assert};
 
@@ -166,11 +166,7 @@ impl BootHeader {
     /// Offset within the partition to the main DOL.
     #[inline]
     pub fn dol_offset(&self, is_wii: bool) -> u64 {
-        if is_wii {
-            self.dol_offset.get() as u64 * 4
-        } else {
-            self.dol_offset.get() as u64
-        }
+        if is_wii { self.dol_offset.get() as u64 * 4 } else { self.dol_offset.get() as u64 }
     }
 
     /// Set the offset within the partition to the main DOL.
@@ -186,11 +182,7 @@ impl BootHeader {
     /// Offset within the partition to the file system table (FST).
     #[inline]
     pub fn fst_offset(&self, is_wii: bool) -> u64 {
-        if is_wii {
-            self.fst_offset.get() as u64 * 4
-        } else {
-            self.fst_offset.get() as u64
-        }
+        if is_wii { self.fst_offset.get() as u64 * 4 } else { self.fst_offset.get() as u64 }
     }
 
     /// Set the offset within the partition to the file system table (FST).
@@ -206,11 +198,7 @@ impl BootHeader {
     /// Size of the file system table (FST).
     #[inline]
     pub fn fst_size(&self, is_wii: bool) -> u64 {
-        if is_wii {
-            self.fst_size.get() as u64 * 4
-        } else {
-            self.fst_size.get() as u64
-        }
+        if is_wii { self.fst_size.get() as u64 * 4 } else { self.fst_size.get() as u64 }
     }
 
     /// Set the size of the file system table (FST).
@@ -226,11 +214,7 @@ impl BootHeader {
     /// Maximum size of the file system table (FST) across multi-disc games.
     #[inline]
     pub fn fst_max_size(&self, is_wii: bool) -> u64 {
-        if is_wii {
-            self.fst_max_size.get() as u64 * 4
-        } else {
-            self.fst_max_size.get() as u64
-        }
+        if is_wii { self.fst_max_size.get() as u64 * 4 } else { self.fst_max_size.get() as u64 }
     }
 
     /// Set the maximum size of the file system table (FST) across multi-disc games.

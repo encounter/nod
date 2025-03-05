@@ -7,14 +7,15 @@ use std::{
 
 use adler::adler32_slice;
 use bytes::{BufMut, Bytes, BytesMut};
-use zerocopy::{little_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, little_endian::*};
 
 use crate::{
+    Error, Result, ResultContext,
     common::{Compression, Format, MagicBytes},
     disc::{
-        reader::DiscReader,
-        writer::{par_process, read_block, BlockProcessor, BlockResult, DataCallback, DiscWriter},
         SECTOR_SIZE,
+        reader::DiscReader,
+        writer::{BlockProcessor, BlockResult, DataCallback, DiscWriter, par_process, read_block},
     },
     io::block::{Block, BlockKind, BlockReader, GCZ_MAGIC},
     read::{DiscMeta, DiscStream},
@@ -25,7 +26,6 @@ use crate::{
         static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
-    Error, Result, ResultContext,
 };
 
 /// GCZ header (little endian)

@@ -9,14 +9,14 @@ use tracing::debug;
 use zerocopy::{FromZeros, IntoBytes};
 
 use crate::{
+    Error, Result, ResultContext,
     disc::{
-        fst::{Fst, FstBuilder},
-        BootHeader, DiscHeader, BI2_SIZE, BOOT_SIZE, GCN_MAGIC, MINI_DVD_SIZE, SECTOR_SIZE,
+        BI2_SIZE, BOOT_SIZE, BootHeader, DiscHeader, GCN_MAGIC, MINI_DVD_SIZE, SECTOR_SIZE,
         WII_MAGIC,
+        fst::{Fst, FstBuilder},
     },
     read::DiscStream,
-    util::{array_ref, array_ref_mut, lfg::LaggedFibonacci, Align},
-    Error, Result, ResultContext,
+    util::{Align, array_ref, array_ref_mut, lfg::LaggedFibonacci},
 };
 
 pub trait FileCallback: Clone + Send + Sync {

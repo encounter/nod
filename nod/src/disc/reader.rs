@@ -10,20 +10,21 @@ use tracing::warn;
 use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
+    Error, Result, ResultContext,
     common::{PartitionInfo, PartitionKind},
     disc::{
+        BB2_OFFSET, BOOT_SIZE, BootHeader, DL_DVD_SIZE, DiscHeader, MINI_DVD_SIZE,
+        SECTOR_GROUP_SIZE, SECTOR_SIZE, SL_DVD_SIZE,
         direct::{DirectDiscReader, DirectDiscReaderMode},
         fst::{Fst, NodeKind},
-        gcn::{read_fst, PartitionReaderGC},
+        gcn::{PartitionReaderGC, read_fst},
         preloader::{
-            fetch_sector_group, Preloader, SectorGroup, SectorGroupLoader, SectorGroupRequest,
+            Preloader, SectorGroup, SectorGroupLoader, SectorGroupRequest, fetch_sector_group,
         },
         wii::{
-            PartitionReaderWii, WiiPartEntry, WiiPartGroup, WiiPartitionHeader, REGION_OFFSET,
-            REGION_SIZE, WII_PART_GROUP_OFF,
+            PartitionReaderWii, REGION_OFFSET, REGION_SIZE, WII_PART_GROUP_OFF, WiiPartEntry,
+            WiiPartGroup, WiiPartitionHeader,
         },
-        BootHeader, DiscHeader, BB2_OFFSET, BOOT_SIZE, DL_DVD_SIZE, MINI_DVD_SIZE,
-        SECTOR_GROUP_SIZE, SECTOR_SIZE, SL_DVD_SIZE,
     },
     io::block::BlockReader,
     read::{DiscMeta, DiscOptions, PartitionEncryption, PartitionOptions, PartitionReader},
@@ -31,7 +32,6 @@ use crate::{
         array_ref, impl_read_for_bufread,
         read::{read_arc, read_from, read_vec},
     },
-    Error, Result, ResultContext,
 };
 
 pub struct DiscReader {

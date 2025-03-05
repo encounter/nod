@@ -8,10 +8,11 @@ use std::{
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 use crate::{
+    Result, ResultContext,
     disc::{
-        preloader::{fetch_sector_group, Preloader, SectorGroup, SectorGroupRequest},
-        ApploaderHeader, BootHeader, DolHeader, BB2_OFFSET, BI2_SIZE, BOOT_SIZE, SECTOR_GROUP_SIZE,
+        ApploaderHeader, BB2_OFFSET, BI2_SIZE, BOOT_SIZE, BootHeader, DolHeader, SECTOR_GROUP_SIZE,
         SECTOR_SIZE,
+        preloader::{Preloader, SectorGroup, SectorGroupRequest, fetch_sector_group},
     },
     io::block::BlockReader,
     read::{DiscStream, PartitionEncryption, PartitionMeta, PartitionReader},
@@ -19,7 +20,6 @@ use crate::{
         impl_read_for_bufread,
         read::{read_arc, read_arc_slice, read_from},
     },
-    Result, ResultContext,
 };
 
 pub struct PartitionReaderGC {

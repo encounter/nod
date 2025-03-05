@@ -1,6 +1,6 @@
 [workspace]
 members = ["nod", "nodtool"]
-resolver = "2"
+resolver = "3"
 
 [profile.release]
 debug = 1
@@ -13,8 +13,8 @@ codegen-units = 1
 
 [workspace.package]
 version = "2.0.0-alpha.1"
-edition = "2021"
-rust-version = "1.81"
+edition = "2024"
+rust-version = "1.85"
 authors = ["Luke Street <luke@street.dev>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/encounter/nod"

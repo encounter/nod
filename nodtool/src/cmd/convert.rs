@@ -47,7 +47,9 @@ pub fn run(args: Args) -> nod::Result<()> {
             (false, true) => PartitionEncryption::ForceEncrypted,
             (false, false) => PartitionEncryption::Original,
             (true, true) => {
-                return Err(nod::Error::Other("Both --decrypt and --encrypt specified".to_string()))
+                return Err(nod::Error::Other(
+                    "Both --decrypt and --encrypt specified".to_string(),
+                ));
             }
         },
         preloader_threads: 4,
@@ -70,7 +72,7 @@ pub fn run(args: Args) -> nod::Result<()> {
             return Err(nod::Error::Other(format!(
                 "Unknown file extension: {}",
                 path_display(&args.out)
-            )))
+            )));
         }
         None => Format::Iso,
     };

@@ -10,11 +10,12 @@ use std::{
 
 use argp::FromArgs;
 use nod::{
+    ResultContext,
     build::gc::{FileCallback, FileInfo, GCPartitionBuilder, PartitionOverrides},
     common::PartitionKind,
     disc::{
-        fst::Fst, BootHeader, DiscHeader, BB2_OFFSET, BI2_SIZE, BOOT_SIZE, MINI_DVD_SIZE,
-        SECTOR_SIZE,
+        BB2_OFFSET, BI2_SIZE, BOOT_SIZE, BootHeader, DiscHeader, MINI_DVD_SIZE, SECTOR_SIZE,
+        fst::Fst,
     },
     read::{
         DiscOptions, DiscReader, PartitionEncryption, PartitionMeta, PartitionOptions,
@@ -22,7 +23,6 @@ use nod::{
     },
     util::lfg::LaggedFibonacci,
     write::{DiscWriter, FormatOptions, ProcessOptions},
-    ResultContext,
 };
 use tracing::{debug, error, info, warn};
 use zerocopy::{FromBytes, FromZeros};
@@ -188,7 +188,7 @@ pub fn run(args: Args) -> nod::Result<()> {
             }
             Err(e) => {
                 return Err(e)
-                    .context(format!("Failed to get metadata for {}", file_path.display()))
+                    .context(format!("Failed to get metadata for {}", file_path.display()));
             }
         };
         if metadata.is_dir() {

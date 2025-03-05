@@ -5,12 +5,12 @@ use std::{borrow::Cow, fmt, str::FromStr, sync::Arc};
 use zerocopy::FromBytes;
 
 use crate::{
+    Error, Result,
     disc::{
-        fst::Fst, wii::WiiPartitionHeader, BootHeader, DebugHeader, DiscHeader, BB2_OFFSET,
-        BOOT_SIZE, SECTOR_SIZE,
+        BB2_OFFSET, BOOT_SIZE, BootHeader, DebugHeader, DiscHeader, SECTOR_SIZE, fst::Fst,
+        wii::WiiPartitionHeader,
     },
     util::array_ref,
-    Error, Result,
 };
 
 /// SHA-1 hash bytes

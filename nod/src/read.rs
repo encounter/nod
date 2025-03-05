@@ -9,17 +9,17 @@ use dyn_clone::DynClone;
 use zerocopy::FromBytes;
 
 use crate::{
+    Result,
     common::{Compression, Format, PartitionInfo, PartitionKind},
     disc,
     disc::{
+        ApploaderHeader, BB2_OFFSET, BI2_SIZE, BOOT_SIZE, BootHeader, DebugHeader, DiscHeader,
+        DolHeader,
         fst::{Fst, Node},
-        wii::{ContentMetadata, Ticket, TmdHeader, H3_TABLE_SIZE, REGION_SIZE},
-        ApploaderHeader, BootHeader, DebugHeader, DiscHeader, DolHeader, BB2_OFFSET, BI2_SIZE,
-        BOOT_SIZE,
+        wii::{ContentMetadata, H3_TABLE_SIZE, REGION_SIZE, Ticket, TmdHeader},
     },
     io::block,
-    util::{array_ref, WindowedReader},
-    Result,
+    util::{WindowedReader, array_ref},
 };
 
 /// Wii partition encryption mode.

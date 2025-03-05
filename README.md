@@ -6,7 +6,7 @@
 [crates.io]: https://crates.io/crates/nod
 [Api Rustdoc]: https://img.shields.io/badge/api-rustdoc-blue.svg
 [rustdoc]: https://docs.rs/nod
-[Rust Version]: https://img.shields.io/badge/rust-1.81+-blue.svg?maxAge=3600
+[Rust Version]: https://img.shields.io/badge/rust-1.85+-blue.svg?maxAge=3600
 
 Library for reading and writing Nintendo Optical Disc (GameCube and Wii) images.
 

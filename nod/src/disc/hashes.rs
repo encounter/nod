@@ -4,8 +4,8 @@ use zerocopy::{FromZeros, IntoBytes};
 use crate::{
     common::HashBytes,
     disc::{
-        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         SECTOR_GROUP_SIZE, SECTOR_SIZE,
+        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
     },
     util::{array_ref, array_ref_mut, digest::sha1_hash},
 };

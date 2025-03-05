@@ -7,11 +7,11 @@ use std::{
 use zerocopy::FromZeros;
 
 use crate::{
+    Result,
     common::KeyBytes,
-    disc::{wii::SECTOR_DATA_SIZE, DiscHeader, SECTOR_SIZE},
+    disc::{DiscHeader, SECTOR_SIZE, wii::SECTOR_DATA_SIZE},
     io::block::{Block, BlockReader},
     util::impl_read_for_bufread,
-    Result,
 };
 
 #[derive(Clone)]

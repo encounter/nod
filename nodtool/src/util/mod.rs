@@ -5,7 +5,7 @@ pub mod shared;
 use std::{
     fmt,
     fmt::Write,
-    path::{Path, MAIN_SEPARATOR},
+    path::{MAIN_SEPARATOR, Path},
 };
 
 pub fn path_display(path: &Path) -> PathDisplay { PathDisplay { path } }

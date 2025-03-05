@@ -3,8 +3,8 @@ use tracing::instrument;
 use crate::{
     common::KeyBytes,
     disc::{
-        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         SECTOR_SIZE,
+        wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
     },
     util::array_ref,
 };
@@ -32,7 +32,7 @@ pub fn aes_cbc_encrypt(key: &KeyBytes, iv: &KeyBytes, data: &mut [u8]) {
     assert_eq!(data.len() % 16, 0);
     #[cfg(not(feature = "openssl"))]
     {
-        use aes::cipher::{block_padding::NoPadding, BlockModeEncrypt, KeyIvInit};
+        use aes::cipher::{BlockModeEncrypt, KeyIvInit, block_padding::NoPadding};
         <cbc::Encryptor<aes::Aes128>>::new(key.into(), iv.into())
             .encrypt_padded::<NoPadding>(data, data.len())
             .unwrap();
@@ -57,7 +57,7 @@ pub fn aes_cbc_decrypt(key: &KeyBytes, iv: &KeyBytes, data: &mut [u8]) {
     assert_eq!(data.len() % 16, 0);
     #[cfg(not(feature = "openssl"))]
     {
-        use aes::cipher::{block_padding::NoPadding, BlockModeDecrypt, KeyIvInit};
+        use aes::cipher::{BlockModeDecrypt, KeyIvInit, block_padding::NoPadding};
         <cbc::Decryptor<aes::Aes128>>::new(key.into(), iv.into())
             .decrypt_padded::<NoPadding>(data)
             .unwrap();
@@ -83,7 +83,7 @@ pub fn aes_cbc_decrypt_b2b(key: &KeyBytes, iv: &KeyBytes, data: &[u8], out: &mut
     assert_eq!(data.len(), out.len());
     #[cfg(not(feature = "openssl"))]
     {
-        use aes::cipher::{block_padding::NoPadding, BlockModeDecrypt, KeyIvInit};
+        use aes::cipher::{BlockModeDecrypt, KeyIvInit, block_padding::NoPadding};
         <cbc::Decryptor<aes::Aes128>>::new(key.into(), iv.into())
             .decrypt_padded_b2b::<NoPadding>(data, out)
             .unwrap();

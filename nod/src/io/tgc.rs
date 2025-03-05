@@ -5,27 +5,27 @@ use std::{
 };
 
 use bytes::{BufMut, Bytes, BytesMut};
-use zerocopy::{big_endian::U32, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, big_endian::U32};
 
 use crate::{
-    build::gc::{insert_junk_data, FileCallback, GCPartitionStream, WriteInfo, WriteKind},
+    Error, Result, ResultContext,
+    build::gc::{FileCallback, GCPartitionStream, WriteInfo, WriteKind, insert_junk_data},
     common::{Compression, Format, MagicBytes, PartitionKind},
     disc::{
+        BB2_OFFSET, BootHeader, DiscHeader, SECTOR_SIZE,
         fst::Fst,
         gcn::{read_dol, read_fst},
         reader::DiscReader,
         writer::{DataCallback, DiscWriter},
-        BootHeader, DiscHeader, BB2_OFFSET, SECTOR_SIZE,
     },
     io::block::{Block, BlockKind, BlockReader, TGC_MAGIC},
     read::{DiscMeta, DiscStream, PartitionOptions, PartitionReader},
     util::{
-        array_ref,
+        Align, array_ref,
         read::{read_arc, read_arc_slice, read_from, read_with_zero_fill},
-        static_assert, Align,
+        static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
-    Error, Result, ResultContext,
 };
 
 /// TGC header (big endian)

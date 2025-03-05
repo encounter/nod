@@ -6,17 +6,18 @@ use std::{
 };
 
 use bytes::{BufMut, Bytes, BytesMut};
-use zerocopy::{big_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, big_endian::*};
 
 use crate::{
+    Error, Result, ResultContext,
     common::{Compression, Format, MagicBytes},
     disc::{
+        SECTOR_SIZE,
         reader::DiscReader,
         writer::{
-            check_block, par_process, read_block, BlockProcessor, BlockResult, CheckBlockResult,
-            DataCallback, DiscWriter,
+            BlockProcessor, BlockResult, CheckBlockResult, DataCallback, DiscWriter, check_block,
+            par_process, read_block,
         },
-        SECTOR_SIZE,
     },
     io::{
         block::{Block, BlockKind, BlockReader, WBFS_MAGIC},
@@ -30,7 +31,6 @@ use crate::{
         read::{read_arc_slice, read_box_slice, read_from},
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
-    Error, Result, ResultContext,
 };
 
 #[derive(Debug, Clone, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]

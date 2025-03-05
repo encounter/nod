@@ -7,9 +7,9 @@ use std::{
 use argp::FromArgs;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use nod::{
+    Result, ResultContext,
     read::{DiscOptions, DiscReader, PartitionEncryption},
     write::{DiscWriter, FormatOptions, ProcessOptions},
-    Result, ResultContext,
 };
 
 use crate::util::{redump, redump::GameResult};

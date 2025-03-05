@@ -8,15 +8,15 @@ use dyn_clone::DynClone;
 use rayon::prelude::*;
 
 use crate::{
+    Error, Result, ResultContext,
     common::PartitionInfo,
     disc::{
+        SECTOR_SIZE,
         reader::DiscReader,
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
-        SECTOR_SIZE,
     },
     util::{aes::decrypt_sector_b2b, array_ref, array_ref_mut, lfg::LaggedFibonacci},
     write::{DiscFinalization, DiscWriterWeight, ProcessOptions},
-    Error, Result, ResultContext,
 };
 
 /// A callback for writing disc data.

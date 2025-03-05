@@ -6,17 +6,18 @@ use std::{
 };
 
 use bytes::{BufMut, Bytes, BytesMut};
-use zerocopy::{little_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, little_endian::*};
 
 use crate::{
+    Error, Result, ResultContext,
     common::{Compression, Format, MagicBytes},
     disc::{
+        SECTOR_SIZE,
         reader::DiscReader,
         writer::{
-            check_block, par_process, read_block, BlockProcessor, BlockResult, CheckBlockResult,
-            DataCallback, DiscWriter,
+            BlockProcessor, BlockResult, CheckBlockResult, DataCallback, DiscWriter, check_block,
+            par_process, read_block,
         },
-        SECTOR_SIZE,
     },
     io::{
         block::{Block, BlockKind, BlockReader, CISO_MAGIC},
@@ -31,7 +32,6 @@ use crate::{
         static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
-    Error, Result, ResultContext,
 };
 
 pub const CISO_MAP_SIZE: usize = SECTOR_SIZE - 8;

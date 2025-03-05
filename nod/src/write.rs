@@ -3,10 +3,10 @@
 use bytes::Bytes;
 
 use crate::{
+    Error, Result,
     common::{Compression, Format},
     disc,
     read::DiscReader,
-    Error, Result,
 };
 
 /// Options for writing a disc image.

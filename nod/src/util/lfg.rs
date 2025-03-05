@@ -7,7 +7,7 @@ use std::{
 
 use bytes::Buf;
 use tracing::instrument;
-use zerocopy::{transmute_ref, IntoBytes};
+use zerocopy::{IntoBytes, transmute_ref};
 
 use crate::{disc::SECTOR_SIZE, util::array_ref_mut};
 

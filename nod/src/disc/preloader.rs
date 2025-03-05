@@ -13,16 +13,17 @@ use crossbeam_channel::{Receiver, Sender};
 use crossbeam_utils::sync::WaitGroup;
 use lru::LruCache;
 use polonius_the_crab::{polonius, polonius_return};
-use simple_moving_average::{SingleSumSMA, SMA};
-use tracing::{debug, error, instrument, span, Level};
+use simple_moving_average::{SMA, SingleSumSMA};
+use tracing::{Level, debug, error, instrument, span};
 use zerocopy::FromZeros;
 
 use crate::{
+    IoResultContext,
     common::PartitionInfo,
     disc::{
-        hashes::{hash_sector_group, GroupHashes},
-        wii::HASHES_SIZE,
         DiscHeader, SECTOR_GROUP_SIZE, SECTOR_SIZE,
+        hashes::{GroupHashes, hash_sector_group},
+        wii::HASHES_SIZE,
     },
     io::{
         block::{Block, BlockKind, BlockReader},
@@ -33,7 +34,6 @@ use crate::{
         aes::{decrypt_sector, encrypt_sector},
         array_ref_mut,
     },
-    IoResultContext,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

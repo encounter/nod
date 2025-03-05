@@ -7,11 +7,11 @@ use std::{
 
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use nod::{
+    Result, ResultContext,
     common::Compression,
     disc::DiscHeader,
     read::{DiscMeta, DiscOptions, DiscReader, PartitionEncryption},
     write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions},
-    Result, ResultContext,
 };
 use size::Size;
 

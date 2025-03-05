@@ -7,9 +7,10 @@ use std::{
     sync::Arc,
 };
 
-use zerocopy::{big_endian::U32, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, big_endian::U32};
 
 use crate::{
+    Error, Result, ResultContext,
     common::{Format, KeyBytes, MagicBytes},
     disc::SECTOR_SIZE,
     io::{
@@ -18,7 +19,6 @@ use crate::{
     },
     read::DiscMeta,
     util::{aes::aes_cbc_decrypt, array_ref_mut, read::read_arc, static_assert},
-    Error, Result, ResultContext,
 };
 
 pub const NFS_END_MAGIC: MagicBytes = *b"SGGE";

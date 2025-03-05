@@ -3,9 +3,9 @@ use std::{io, io::Read};
 use tracing::instrument;
 
 use crate::{
+    Error, Result,
     common::Compression,
     io::wia::{WIACompression, WIADisc},
-    Error, Result,
 };
 
 pub struct Decompressor {

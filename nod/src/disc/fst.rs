@@ -4,11 +4,11 @@ use std::{borrow::Cow, ffi::CStr, mem::size_of};
 
 use encoding_rs::SHIFT_JIS;
 use itertools::Itertools;
-use zerocopy::{big_endian::*, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, big_endian::*};
 
 use crate::{
-    util::{array_ref, static_assert},
     Error, Result,
+    util::{array_ref, static_assert},
 };
 
 /// File system node kind.
@@ -39,13 +39,14 @@ impl Node {
     /// Create a new node.
     #[inline]
     pub fn new(kind: NodeKind, name_offset: u32, offset: u64, length: u32, is_wii: bool) -> Self {
+        let name_offset_bytes = name_offset.to_be_bytes();
         Self {
             kind: match kind {
                 NodeKind::File => 0,
                 NodeKind::Directory => 1,
                 NodeKind::Invalid => u8::MAX,
             },
-            name_offset: *array_ref![name_offset.to_be_bytes(), 1, 3],
+            name_offset: *array_ref![name_offset_bytes, 1, 3],
             offset: U32::new(match kind {
                 NodeKind::File if is_wii => (offset / 4) as u32,
                 _ => offset as u32,
@@ -91,7 +92,8 @@ impl Node {
     /// Set the name offset of the node.
     #[inline]
     pub fn set_name_offset(&mut self, name_offset: u32) {
-        self.name_offset = *array_ref![name_offset.to_be_bytes(), 1, 3];
+        let name_offset_bytes = name_offset.to_be_bytes();
+        self.name_offset = *array_ref![name_offset_bytes, 1, 3];
     }
 
     /// For files, this is the partition offset of the file data. (Wii: >> 2)
