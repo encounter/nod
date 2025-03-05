@@ -26,7 +26,7 @@ openssl-vendored = ["nod/openssl-vendored"]
 tracy = ["dep:tracing-tracy"]
 
 [dependencies]
-argp = "0.3"
+argp = "0.4"
 crc32fast = "1.4"
 digest = { workspace = true }
 enable-ansi-support = "0.2"
@@ -38,7 +38,7 @@ num_cpus = "1.16"
 quick-xml = { version = "0.37", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 sha1 = { workspace = true }
-size = "0.4"
+size = "0.5"
 supports-color = "3.0"
 tracing = { workspace = true }
 tracing-attributes = "0.1"
