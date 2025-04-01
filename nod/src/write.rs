@@ -1,5 +1,7 @@
 //! [`DiscWriter`] and associated types.
 
+use std::io;
+
 use bytes::Bytes;
 
 use crate::{
@@ -70,13 +72,20 @@ pub struct ProcessOptions {
     pub digest_xxh64: bool,
 }
 
+/// A callback for writing disc data.
+///
+/// The callback should write all data to the output stream before returning, or return an error if
+/// writing fails. The second and third arguments are the current bytes processed and the total
+/// bytes to process, respectively. For most formats, this has no relation to the written disc size,
+/// but can be used to display progress.
+pub type DataCallback<'a> = dyn FnMut(Bytes, u64, u64) -> io::Result<()> + 'a;
+
 /// A constructed disc writer.
 ///
 /// This is the primary entry point for writing disc images.
 #[derive(Clone)]
-pub struct DiscWriter {
-    inner: Box<dyn disc::writer::DiscWriter>,
-}
+#[repr(transparent)]
+pub struct DiscWriter(Box<dyn disc::writer::DiscWriter>);
 
 impl DiscWriter {
     /// Creates a new disc writer with the specified format options.
@@ -101,31 +110,33 @@ impl DiscWriter {
             Format::Wia | Format::Rvz => crate::io::wia::DiscWriterWIA::new(reader, &options)?,
             format => return Err(Error::Other(format!("Unsupported write format: {format}"))),
         };
-        Ok(DiscWriter { inner })
+        Ok(DiscWriter(inner))
     }
 
     /// Processes the disc writer to completion, calling the data callback, in order, for each block
     /// of data to write to the output file. The callback should write all data before returning, or
     /// return an error if writing fails.
+    ///
+    /// See [`DataCallback`] for more information.
     #[inline]
     pub fn process(
         &self,
-        mut data_callback: impl FnMut(Bytes, u64, u64) -> std::io::Result<()>,
+        mut data_callback: impl FnMut(Bytes, u64, u64) -> io::Result<()>,
         options: &ProcessOptions,
     ) -> Result<DiscFinalization> {
-        self.inner.process(&mut data_callback, options)
+        self.0.process(&mut data_callback, options)
     }
 
     /// Returns the progress upper bound for the disc writer. For most formats, this has no
     /// relation to the written disc size, but can be used to display progress.
     #[inline]
-    pub fn progress_bound(&self) -> u64 { self.inner.progress_bound() }
+    pub fn progress_bound(&self) -> u64 { self.0.progress_bound() }
 
     /// Returns the weight of the disc writer, which can help determine the number of threads to
     /// dedicate for output processing. This may depend on the format's configuration, such as
     /// whether compression is enabled.
     #[inline]
-    pub fn weight(&self) -> DiscWriterWeight { self.inner.weight() }
+    pub fn weight(&self) -> DiscWriterWeight { self.0.weight() }
 }
 
 /// Data returned by the disc writer after processing.

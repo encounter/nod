@@ -16,7 +16,7 @@ use crate::{
         fst::Fst,
         gcn::{read_dol, read_fst},
         reader::DiscReader,
-        writer::{DataCallback, DiscWriter},
+        writer::DiscWriter,
     },
     io::block::{Block, BlockKind, BlockReader, TGC_MAGIC},
     read::{DiscMeta, DiscStream, PartitionOptions, PartitionReader},
@@ -25,7 +25,7 @@ use crate::{
         read::{read_arc_at, read_arc_slice_at, read_at, read_with_zero_fill},
         static_assert,
     },
-    write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
 };
 
 /// TGC header (big endian)

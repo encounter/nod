@@ -15,8 +15,8 @@ use crate::{
         SECTOR_SIZE,
         reader::DiscReader,
         writer::{
-            BlockProcessor, BlockResult, CheckBlockResult, DataCallback, DiscWriter, check_block,
-            par_process, read_block,
+            BlockProcessor, BlockResult, CheckBlockResult, DiscWriter, check_block, par_process,
+            read_block,
         },
     },
     io::{
@@ -31,7 +31,7 @@ use crate::{
         read::{box_to_bytes, read_arc_at},
         static_assert,
     },
-    write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
 };
 
 pub const CISO_MAP_SIZE: usize = SECTOR_SIZE - 8;

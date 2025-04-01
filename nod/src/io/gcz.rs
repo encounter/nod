@@ -15,7 +15,7 @@ use crate::{
     disc::{
         SECTOR_SIZE,
         reader::DiscReader,
-        writer::{BlockProcessor, BlockResult, DataCallback, DiscWriter, par_process, read_block},
+        writer::{BlockProcessor, BlockResult, DiscWriter, par_process, read_block},
     },
     io::block::{Block, BlockKind, BlockReader, GCZ_MAGIC},
     read::{DiscMeta, DiscStream},
@@ -25,7 +25,7 @@ use crate::{
         read::{read_arc_slice_at, read_at},
         static_assert,
     },
-    write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
 };
 
 /// GCZ header (little endian)

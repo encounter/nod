@@ -20,7 +20,7 @@ use crate::{
         fst::Fst,
         reader::DiscReader,
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
-        writer::{BlockProcessor, BlockResult, DataCallback, DiscWriter, par_process, read_block},
+        writer::{BlockProcessor, BlockResult, DiscWriter, par_process, read_block},
     },
     io::{
         block::{Block, BlockKind, BlockReader, RVZ_MAGIC, WIA_MAGIC},
@@ -40,7 +40,7 @@ use crate::{
         },
         static_assert,
     },
-    write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
 };
 
 const WIA_VERSION: u32 = 0x01000000;

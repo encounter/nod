@@ -2,7 +2,7 @@ use std::{
     fs,
     fs::File,
     io,
-    io::{BufRead, Read, Seek, SeekFrom, Write},
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     str::from_utf8,
     time::Instant,
@@ -21,7 +21,7 @@ use nod::{
         DiscOptions, DiscReader, PartitionEncryption, PartitionMeta, PartitionOptions,
         PartitionReader,
     },
-    util::lfg::LaggedFibonacci,
+    util::{buf_copy, lfg::LaggedFibonacci},
     write::{DiscWriter, FormatOptions, ProcessOptions},
 };
 use tracing::{debug, error, info, warn};
@@ -744,24 +744,4 @@ where W: Write
     }
 
     fn stream_position(&mut self) -> io::Result<u64> { Ok(self.position) }
-}
-
-/// Copies from a buffered reader to a writer without extra allocations.
-fn buf_copy<R, W>(reader: &mut R, writer: &mut W) -> io::Result<u64>
-where
-    R: BufRead + ?Sized,
-    W: Write + ?Sized,
-{
-    let mut copied = 0;
-    loop {
-        let buf = reader.fill_buf()?;
-        let len = buf.len();
-        if len == 0 {
-            break;
-        }
-        writer.write_all(buf)?;
-        reader.consume(len);
-        copied += len as u64;
-    }
-    Ok(copied)
 }

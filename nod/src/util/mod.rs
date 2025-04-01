@@ -14,7 +14,7 @@ pub(crate) mod digest;
 pub mod lfg;
 pub(crate) mod read;
 
-/// Copies from a buffered reader to a writer without extra allocations.
+/// Copies from a [`BufRead`] to a [`Write`] without allocating a buffer.
 pub fn buf_copy<R, W>(reader: &mut R, writer: &mut W) -> io::Result<u64>
 where
     R: BufRead + ?Sized,

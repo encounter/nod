@@ -16,16 +16,8 @@ use crate::{
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
     },
     util::{aes::decrypt_sector_b2b, array_ref, array_ref_mut, lfg::LaggedFibonacci},
-    write::{DiscFinalization, DiscWriterWeight, ProcessOptions},
+    write::{DataCallback, DiscFinalization, DiscWriterWeight, ProcessOptions},
 };
-
-/// A callback for writing disc data.
-///
-/// The callback should write all data to the output stream before returning, or return an error if
-/// writing fails. The second and third arguments are the current bytes processed and the total
-/// bytes to process, respectively. For most formats, this has no relation to the written disc size,
-/// but can be used to display progress.
-pub type DataCallback<'a> = dyn FnMut(Bytes, u64, u64) -> io::Result<()> + 'a;
 
 /// A trait for writing disc images.
 pub trait DiscWriter: DynClone {

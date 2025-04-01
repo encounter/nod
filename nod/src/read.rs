@@ -167,16 +167,15 @@ where T: Read + Seek + Send
 ///
 /// This is the primary entry point for reading disc images.
 #[derive(Clone)]
-pub struct DiscReader {
-    inner: disc::reader::DiscReader,
-}
+#[repr(transparent)]
+pub struct DiscReader(disc::reader::DiscReader);
 
 impl DiscReader {
     /// Opens a disc image from a file path.
     pub fn new<P: AsRef<Path>>(path: P, options: &DiscOptions) -> Result<DiscReader> {
         let io = block::open(path.as_ref())?;
         let inner = disc::reader::DiscReader::new(io, options)?;
-        Ok(DiscReader { inner })
+        Ok(DiscReader(inner))
     }
 
     /// Opens a disc image from a [`DiscStream`]. This allows low-overhead, multithreaded
@@ -185,8 +184,8 @@ impl DiscReader {
     /// See [`DiscStream`] for more information.
     pub fn new_stream(stream: Box<dyn DiscStream>, options: &DiscOptions) -> Result<DiscReader> {
         let io = block::new(stream)?;
-        let reader = disc::reader::DiscReader::new(io, options)?;
-        Ok(DiscReader { inner: reader })
+        let inner = disc::reader::DiscReader::new(io, options)?;
+        Ok(DiscReader(inner))
     }
 
     /// Opens a disc image from a [`Read`] + [`Seek`] stream that can be cloned.
@@ -217,27 +216,27 @@ impl DiscReader {
 
     /// The disc's primary header.
     #[inline]
-    pub fn header(&self) -> &DiscHeader { self.inner.header() }
+    pub fn header(&self) -> &DiscHeader { self.0.header() }
 
     /// The Wii disc's region information.
     ///
     /// **GameCube**: This will return `None`.
     #[inline]
-    pub fn region(&self) -> Option<&[u8; REGION_SIZE]> { self.inner.region() }
+    pub fn region(&self) -> Option<&[u8; REGION_SIZE]> { self.0.region() }
 
     /// Returns extra metadata included in the disc file format, if any.
     #[inline]
-    pub fn meta(&self) -> DiscMeta { self.inner.meta() }
+    pub fn meta(&self) -> DiscMeta { self.0.meta() }
 
     /// The disc's size in bytes, or an estimate if not stored by the format.
     #[inline]
-    pub fn disc_size(&self) -> u64 { self.inner.disc_size() }
+    pub fn disc_size(&self) -> u64 { self.0.disc_size() }
 
     /// A list of Wii partitions on the disc.
     ///
     /// **GameCube**: This will return an empty slice.
     #[inline]
-    pub fn partitions(&self) -> &[PartitionInfo] { self.inner.partitions() }
+    pub fn partitions(&self) -> &[PartitionInfo] { self.0.partitions() }
 
     /// Opens a decrypted partition read stream for the specified partition index.
     ///
@@ -248,7 +247,7 @@ impl DiscReader {
         index: usize,
         options: &PartitionOptions,
     ) -> Result<Box<dyn PartitionReader>> {
-        self.inner.open_partition(index, options)
+        self.0.open_partition(index, options)
     }
 
     /// Opens a decrypted partition read stream for the first partition matching
@@ -261,28 +260,28 @@ impl DiscReader {
         kind: PartitionKind,
         options: &PartitionOptions,
     ) -> Result<Box<dyn PartitionReader>> {
-        self.inner.open_partition_kind(kind, options)
+        self.0.open_partition_kind(kind, options)
     }
 
-    pub(crate) fn into_inner(self) -> disc::reader::DiscReader { self.inner }
+    pub(crate) fn into_inner(self) -> disc::reader::DiscReader { self.0 }
 }
 
 impl BufRead for DiscReader {
     #[inline]
-    fn fill_buf(&mut self) -> io::Result<&[u8]> { self.inner.fill_buf() }
+    fn fill_buf(&mut self) -> io::Result<&[u8]> { self.0.fill_buf() }
 
     #[inline]
-    fn consume(&mut self, amt: usize) { self.inner.consume(amt) }
+    fn consume(&mut self, amt: usize) { self.0.consume(amt) }
 }
 
 impl Read for DiscReader {
     #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.inner.read(buf) }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.0.read(buf) }
 }
 
 impl Seek for DiscReader {
     #[inline]
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> { self.inner.seek(pos) }
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> { self.0.seek(pos) }
 }
 
 /// Extra metadata about the underlying disc file format.

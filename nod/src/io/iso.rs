@@ -3,15 +3,11 @@ use std::{io, io::BufRead};
 use crate::{
     Result, ResultContext,
     common::Format,
-    disc::{
-        SECTOR_SIZE,
-        reader::DiscReader,
-        writer::{DataCallback, DiscWriter},
-    },
+    disc::{SECTOR_SIZE, reader::DiscReader, writer::DiscWriter},
     io::block::{Block, BlockKind, BlockReader},
     read::{DiscMeta, DiscStream},
     util::digest::DigestManager,
-    write::{DiscFinalization, DiscWriterWeight, ProcessOptions},
+    write::{DataCallback, DiscFinalization, DiscWriterWeight, ProcessOptions},
 };
 
 #[derive(Clone)]

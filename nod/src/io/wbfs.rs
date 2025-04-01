@@ -15,8 +15,8 @@ use crate::{
         SECTOR_SIZE,
         reader::DiscReader,
         writer::{
-            BlockProcessor, BlockResult, CheckBlockResult, DataCallback, DiscWriter, check_block,
-            par_process, read_block,
+            BlockProcessor, BlockResult, CheckBlockResult, DiscWriter, check_block, par_process,
+            read_block,
         },
     },
     io::{
@@ -30,7 +30,7 @@ use crate::{
         lfg::LaggedFibonacci,
         read::{read_arc_slice_at, read_at, read_box_slice_at},
     },
-    write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
 };
 
 #[derive(Debug, Clone, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]

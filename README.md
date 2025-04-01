@@ -81,17 +81,21 @@ Opening a disc image and reading a file:
 ```rust
 use std::io::Read;
 
+use nod::{
+    common::PartitionKind,
+    read::{DiscOptions, DiscReader, PartitionOptions},
+};
+
 // Open a disc image and the first data partition.
-let disc = nod::Disc::new("path/to/file.iso")
-    .expect("Failed to open disc");
-let mut partition = disc.open_partition_kind(nod::PartitionKind::Data)
+let disc =
+    DiscReader::new("path/to/file.iso", &DiscOptions::default()).expect("Failed to open disc");
+let mut partition = disc
+    .open_partition_kind(PartitionKind::Data, &PartitionOptions::default())
     .expect("Failed to open data partition");
 
 // Read partition metadata and the file system table.
-let meta = partition.meta()
-    .expect("Failed to read partition metadata");
-let fst = meta.fst()
-    .expect("File system table is invalid");
+let meta = partition.meta().expect("Failed to read partition metadata");
+let fst = meta.fst().expect("File system table is invalid");
 
 // Find a file by path and read it into a string.
 if let Some((_, node)) = fst.find("/MP3/Worlds.txt") {
@@ -108,16 +112,98 @@ if let Some((_, node)) = fst.find("/MP3/Worlds.txt") {
 Converting a disc image to raw ISO:
 
 ```rust
-// Enable `rebuild_encryption` to ensure the output is a valid ISO.
-let options = nod::OpenOptions { rebuild_encryption: true, ..Default::default() };
-let mut disc = nod::Disc::new_with_options("path/to/file.rvz", &options)
-    .expect("Failed to open disc");
+use nod::read::{DiscOptions, DiscReader, PartitionEncryption};
 
-// Read directly from the open disc and write to the output file.
-let mut out = std::fs::File::create("output.iso")
+let options = DiscOptions {
+    partition_encryption: PartitionEncryption::Original,
+    // Use 4 threads to preload data as the disc is read. This can speed up sequential reads,
+    // especially when the disc image format uses compression.
+    preloader_threads: 4,
+};
+// Open a disc image.
+let mut disc = DiscReader::new("path/to/file.rvz", &options).expect("Failed to open disc");
+
+// Create a new output file.
+let mut out = std::fs::File::create("output.iso").expect("Failed to create output file");
+// Read directly from the DiscReader and write to the output file.
+// NOTE: Any copy method that accepts `Read` and `Write` can be used here,
+// such as `std::io::copy`. This example utilizes `BufRead` for efficiency,
+// since `DiscReader` has its own internal buffer.
+nod::util::buf_copy(&mut disc, &mut out).expect("Failed to write data");
+```
+
+Converting a disc image to RVZ:
+
+```rust
+use std::fs::File;
+use std::io::{Seek, Write};
+use nod::common::{Compression, Format};
+use nod::read::{DiscOptions, DiscReader, PartitionEncryption};
+use nod::write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions};
+
+let open_options = DiscOptions {
+    partition_encryption: PartitionEncryption::Original,
+    // Use 4 threads to preload data as the disc is read. This can speed up sequential reads,
+    // especially when the disc image format uses compression.
+    preloader_threads: 4,
+};
+// Open a disc image.
+let disc = DiscReader::new("path/to/file.iso", &open_options)
+    .expect("Failed to open disc");
+// Create a new output file.
+let mut output_file = File::create("output.rvz")
     .expect("Failed to create output file");
-std::io::copy(&mut disc, &mut out)
-    .expect("Failed to write data");
+
+let options = FormatOptions {
+    format: Format::Rvz,
+    compression: Compression::Zstandard(19),
+    block_size: Format::Rvz.default_block_size(),
+};
+// Create a disc writer with the desired output format.
+let mut writer = DiscWriter::new(disc, &options)
+    .expect("Failed to create writer");
+
+// Ideally we'd base this on the actual number of CPUs available.
+// This is just an example.
+let num_threads = match writer.weight() {
+    DiscWriterWeight::Light => 0,
+    DiscWriterWeight::Medium => 4,
+    DiscWriterWeight::Heavy => 12,
+};
+let process_options = ProcessOptions {
+    processor_threads: num_threads,
+    // Enable checksum calculation for the _original_ disc data.
+    // Digests will be stored in the output file for verification, if supported.
+    // They will also be returned in the finalization result.
+    digest_crc32: true,
+    digest_md5: false, // MD5 is slow, skip it
+    digest_sha1: true,
+    digest_xxh64: true,
+};
+// Start processing the disc image.
+let finalization = writer.process(
+    |data, _progress, _total| {
+        output_file.write_all(data.as_ref())?;
+        // One could display progress here, if desired.
+        Ok(())
+    },
+    &process_options
+)
+.expect("Failed to process disc image");
+
+// Some disc writers calculate data during processing.
+// If the finalization returns header data, seek to the beginning of the file and write it.
+if !finalization.header.is_empty() {
+    output_file.rewind()
+        .expect("Failed to seek");
+    output_file.write_all(finalization.header.as_ref())
+        .expect("Failed to write header");
+}
+output_file.flush().expect("Failed to flush output file");
+
+// Display the calculated digests.
+println!("CRC32: {:08X}", finalization.crc32.unwrap());
+// ...
 ```
 
 ## License

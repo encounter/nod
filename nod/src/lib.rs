@@ -1,16 +1,16 @@
 #![allow(clippy::new_ret_no_self)]
 #![warn(missing_docs)]
-//! Library for traversing & reading Nintendo Optical Disc (GameCube and Wii) images.
+//! Library for reading and writing Nintendo Optical Disc (GameCube and Wii) images.
 //!
 //! Originally based on the C++ library [nod](https://github.com/AxioDL/nod),
-//! but does not currently support authoring.
+//! but with extended format support and many additional features.
 //!
 //! Currently supported file formats:
 //! - ISO (GCM)
 //! - WIA / RVZ
 //! - WBFS (+ NKit 2 lossless)
 //! - CISO (+ NKit 2 lossless)
-//! - NFS (Wii U VC)
+//! - NFS (Wii U VC, read-only)
 //! - GCZ
 //! - TGC
 //!
@@ -75,11 +75,16 @@
 //! Converting a disc image to RVZ:
 //!
 //! ```no_run
-//! use std::fs::File;
-//! use std::io::{Seek, Write};
-//! use nod::common::{Compression, Format};
-//! use nod::read::{DiscOptions, DiscReader, PartitionEncryption};
-//! use nod::write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions};
+//! use std::{
+//!     fs::File,
+//!     io::{Seek, Write},
+//! };
+//!
+//! use nod::{
+//!     common::{Compression, Format},
+//!     read::{DiscOptions, DiscReader, PartitionEncryption},
+//!     write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions},
+//! };
 //!
 //! let open_options = DiscOptions {
 //!     partition_encryption: PartitionEncryption::Original,
@@ -88,11 +93,9 @@
 //!     preloader_threads: 4,
 //! };
 //! // Open a disc image.
-//! let disc = DiscReader::new("path/to/file.iso", &open_options)
-//!     .expect("Failed to open disc");
+//! let disc = DiscReader::new("path/to/file.iso", &open_options).expect("Failed to open disc");
 //! // Create a new output file.
-//! let mut output_file = File::create("output.rvz")
-//!     .expect("Failed to create output file");
+//! let mut output_file = File::create("output.rvz").expect("Failed to create output file");
 //!
 //! let options = FormatOptions {
 //!     format: Format::Rvz,
@@ -100,8 +103,7 @@
 //!     block_size: Format::Rvz.default_block_size(),
 //! };
 //! // Create a disc writer with the desired output format.
-//! let mut writer = DiscWriter::new(disc, &options)
-//!     .expect("Failed to create writer");
+//! let mut writer = DiscWriter::new(disc, &options).expect("Failed to create writer");
 //!
 //! // Ideally we'd base this on the actual number of CPUs available.
 //! // This is just an example.
@@ -121,29 +123,29 @@
 //!     digest_xxh64: true,
 //! };
 //! // Start processing the disc image.
-//! let finalization = writer.process(
-//!     |data, _progress, _total| {
-//!         output_file.write_all(data.as_ref())?;
-//!         // One could display progress here, if desired.
-//!         Ok(())
-//!     },
-//!     &process_options
-//! )
-//! .expect("Failed to process disc image");
+//! let finalization = writer
+//!     .process(
+//!         |data, _progress, _total| {
+//!             output_file.write_all(data.as_ref())?;
+//!             // One could display progress here, if desired.
+//!             Ok(())
+//!         },
+//!         &process_options,
+//!     )
+//!     .expect("Failed to process disc image");
 //!
 //! // Some disc writers calculate data during processing.
 //! // If the finalization returns header data, seek to the beginning of the file and write it.
 //! if !finalization.header.is_empty() {
-//!     output_file.rewind()
-//!         .expect("Failed to seek");
-//!     output_file.write_all(finalization.header.as_ref())
-//!         .expect("Failed to write header");
+//!     output_file.rewind().expect("Failed to seek");
+//!     output_file.write_all(finalization.header.as_ref()).expect("Failed to write header");
 //! }
 //! output_file.flush().expect("Failed to flush output file");
 //!
 //! // Display the calculated digests.
 //! println!("CRC32: {:08X}", finalization.crc32.unwrap());
 //! // ...
+//! ```
 
 pub mod build;
 pub mod common;
