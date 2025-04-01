@@ -1,6 +1,6 @@
 use std::{
     io,
-    io::{Read, Seek, SeekFrom},
+    io::{Seek, SeekFrom},
     mem::size_of,
     sync::Arc,
 };
@@ -22,7 +22,7 @@ use crate::{
     util::{
         compress::{Compressor, DecompressionKind, Decompressor},
         digest::DigestManager,
-        read::{read_arc_slice, read_from},
+        read::{read_arc_slice_at, read_at},
         static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
@@ -69,18 +69,22 @@ impl Clone for BlockReaderGCZ {
 impl BlockReaderGCZ {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
         // Read header
-        inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
-        let header: GCZHeader = read_from(inner.as_mut()).context("Reading GCZ header")?;
+        let header: GCZHeader = read_at(inner.as_mut(), 0).context("Reading GCZ header")?;
         if header.magic != GCZ_MAGIC {
             return Err(Error::DiscFormat("Invalid GCZ magic".to_string()));
         }
 
         // Read block map and hashes
         let block_count = header.block_count.get();
-        let block_map = read_arc_slice(inner.as_mut(), block_count as usize)
-            .context("Reading GCZ block map")?;
-        let block_hashes = read_arc_slice(inner.as_mut(), block_count as usize)
-            .context("Reading GCZ block hashes")?;
+        let block_map =
+            read_arc_slice_at(inner.as_mut(), block_count as usize, size_of::<GCZHeader>() as u64)
+                .context("Reading GCZ block map")?;
+        let block_hashes = read_arc_slice_at(
+            inner.as_mut(),
+            block_count as usize,
+            size_of::<GCZHeader>() as u64 + block_count as u64 * 8,
+        )
+        .context("Reading GCZ block hashes")?;
 
         // header + block_count * (u64 + u32)
         let data_offset = size_of::<GCZHeader>() as u64 + block_count as u64 * 12;
@@ -121,29 +125,29 @@ impl BlockReader for BlockReaderGCZ {
             .get()
             & !(1 << 63))
             - file_offset) as usize;
-        if compressed_size > self.block_buf.len() {
+        if compressed_size > block_size as usize {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
                     "Compressed block size exceeds block size: {} > {}",
-                    compressed_size,
-                    self.block_buf.len()
+                    compressed_size, block_size
                 ),
             ));
-        } else if !compressed && compressed_size != self.block_buf.len() {
+        } else if !compressed && compressed_size != block_size as usize {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
                     "Uncompressed block size does not match block size: {} != {}",
-                    compressed_size,
-                    self.block_buf.len()
+                    compressed_size, block_size
                 ),
             ));
         }
 
         // Read block
-        self.inner.seek(SeekFrom::Start(self.data_offset + file_offset))?;
-        self.inner.read_exact(&mut self.block_buf[..compressed_size])?;
+        self.inner.read_exact_at(
+            &mut self.block_buf[..compressed_size],
+            self.data_offset + file_offset,
+        )?;
 
         // Verify block checksum
         let checksum = adler32_slice(&self.block_buf[..compressed_size]);
@@ -315,7 +319,7 @@ impl DiscWriter for DiscWriterGCZ {
         let mut input_position = 0;
         let mut data_position = 0;
         par_process(
-            || BlockProcessorGCZ {
+            BlockProcessorGCZ {
                 inner: self.inner.clone(),
                 header: self.header.clone(),
                 compressor: Compressor::new(self.compression, block_size as usize),

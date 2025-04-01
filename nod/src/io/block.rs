@@ -14,11 +14,16 @@ use crate::{
         wia::{WIAException, WIAExceptionList},
     },
     read::{DiscMeta, DiscStream},
-    util::{aes::decrypt_sector, array_ref, array_ref_mut, lfg::LaggedFibonacci, read::read_from},
+    util::{
+        aes::decrypt_sector,
+        array_ref, array_ref_mut,
+        lfg::LaggedFibonacci,
+        read::{read_at, read_from},
+    },
 };
 
 /// Block reader trait for reading disc images.
-pub trait BlockReader: DynClone + Send + Sync {
+pub trait BlockReader: DynClone + Send {
     /// Reads a block from the disc image containing the specified sector.
     fn read_block(&mut self, out: &mut [u8], sector: u32) -> io::Result<Block>;
 
@@ -33,25 +38,26 @@ dyn_clone::clone_trait_object!(BlockReader);
 
 /// Creates a new [`BlockReader`] instance from a stream.
 pub fn new(mut stream: Box<dyn DiscStream>) -> Result<Box<dyn BlockReader>> {
-    let io: Box<dyn BlockReader> = match detect(stream.as_mut()).context("Detecting file type")? {
-        Some(Format::Iso) => crate::io::iso::BlockReaderISO::new(stream)?,
-        Some(Format::Ciso) => crate::io::ciso::BlockReaderCISO::new(stream)?,
-        Some(Format::Gcz) => {
-            #[cfg(feature = "compress-zlib")]
-            {
-                crate::io::gcz::BlockReaderGCZ::new(stream)?
+    let io: Box<dyn BlockReader> =
+        match detect_stream(stream.as_mut()).context("Detecting file type")? {
+            Some(Format::Iso) => crate::io::iso::BlockReaderISO::new(stream)?,
+            Some(Format::Ciso) => crate::io::ciso::BlockReaderCISO::new(stream)?,
+            Some(Format::Gcz) => {
+                #[cfg(feature = "compress-zlib")]
+                {
+                    crate::io::gcz::BlockReaderGCZ::new(stream)?
+                }
+                #[cfg(not(feature = "compress-zlib"))]
+                return Err(Error::DiscFormat("GCZ support is disabled".to_string()));
             }
-            #[cfg(not(feature = "compress-zlib"))]
-            return Err(Error::DiscFormat("GCZ support is disabled".to_string()));
-        }
-        Some(Format::Nfs) => {
-            return Err(Error::DiscFormat("NFS requires a filesystem path".to_string()));
-        }
-        Some(Format::Wbfs) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
-        Some(Format::Wia | Format::Rvz) => crate::io::wia::BlockReaderWIA::new(stream)?,
-        Some(Format::Tgc) => crate::io::tgc::BlockReaderTGC::new(stream)?,
-        None => return Err(Error::DiscFormat("Unknown disc format".to_string())),
-    };
+            Some(Format::Nfs) => {
+                return Err(Error::DiscFormat("NFS requires a filesystem path".to_string()));
+            }
+            Some(Format::Wbfs) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
+            Some(Format::Wia | Format::Rvz) => crate::io::wia::BlockReaderWIA::new(stream)?,
+            Some(Format::Tgc) => crate::io::tgc::BlockReaderTGC::new(stream)?,
+            None => return Err(Error::DiscFormat("Unknown disc format".to_string())),
+        };
     check_block_size(io.as_ref())?;
     Ok(io)
 }
@@ -71,7 +77,9 @@ pub fn open(filename: &Path) -> Result<Box<dyn BlockReader>> {
         return Err(Error::DiscFormat(format!("Input is not a file: {}", filename.display())));
     }
     let mut stream = Box::new(SplitFileReader::new(filename)?);
-    let io: Box<dyn BlockReader> = match detect(stream.as_mut()).context("Detecting file type")? {
+    let io: Box<dyn BlockReader> = match detect_stream(stream.as_mut())
+        .context("Detecting file type")?
+    {
         Some(Format::Iso) => crate::io::iso::BlockReaderISO::new(stream)?,
         Some(Format::Ciso) => crate::io::ciso::BlockReaderCISO::new(stream)?,
         Some(Format::Gcz) => {
@@ -109,12 +117,23 @@ pub const RVZ_MAGIC: MagicBytes = *b"RVZ\x01";
 
 pub fn detect<R>(stream: &mut R) -> io::Result<Option<Format>>
 where R: Read + ?Sized {
-    let data: [u8; 0x20] = match read_from(stream) {
-        Ok(magic) => magic,
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    let out = match *array_ref!(data, 0, 4) {
+    match read_from(stream) {
+        Ok(ref magic) => Ok(detect_internal(magic)),
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+fn detect_stream(stream: &mut dyn DiscStream) -> io::Result<Option<Format>> {
+    match read_at(stream, 0) {
+        Ok(ref magic) => Ok(detect_internal(magic)),
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+fn detect_internal(data: &[u8; 0x20]) -> Option<Format> {
+    match *array_ref!(data, 0, 4) {
         CISO_MAGIC => Some(Format::Ciso),
         GCZ_MAGIC => Some(Format::Gcz),
         NFS_MAGIC => Some(Format::Nfs),
@@ -126,8 +145,7 @@ where R: Read + ?Sized {
             Some(Format::Iso)
         }
         _ => None,
-    };
-    Ok(out)
+    }
 }
 
 fn check_block_size(io: &dyn BlockReader) -> Result<()> {

@@ -1,15 +1,12 @@
-use std::{
-    io,
-    io::{Read, Seek, SeekFrom, Write},
-};
+use std::io::{self, Read, Seek, Write};
 
 use tracing::warn;
 
 use crate::{
     common::MagicBytes,
     disc::DL_DVD_SIZE,
-    read::DiscMeta,
-    util::read::{read_from, read_u16_be, read_u32_be, read_u64_be, read_vec},
+    read::{DiscMeta, DiscStream},
+    util::read::{read_at, read_from, read_u16_be, read_u32_be, read_u64_be, read_vec},
 };
 
 #[allow(unused)]
@@ -89,12 +86,16 @@ impl Default for NKitHeader {
 const VERSION_PREFIX: [u8; 7] = *b"NKIT  v";
 
 impl NKitHeader {
-    pub fn try_read_from<R>(reader: &mut R, block_size: u32, has_junk_bits: bool) -> Option<Self>
-    where R: Read + Seek + ?Sized {
-        let magic: MagicBytes = read_from(reader).ok()?;
+    pub fn try_read_from(
+        reader: &mut dyn DiscStream,
+        pos: u64,
+        block_size: u32,
+        has_junk_bits: bool,
+    ) -> Option<Self> {
+        let magic: MagicBytes = read_at(reader, 0).ok()?;
         if magic == *b"NKIT" {
-            reader.seek(SeekFrom::Current(-4)).ok()?;
-            match NKitHeader::read_from(reader, block_size, has_junk_bits) {
+            let mut reader = ReadAdapter::new(reader, pos);
+            match NKitHeader::read_from(&mut reader, block_size, has_junk_bits) {
                 Ok(header) => Some(header),
                 Err(e) => {
                     warn!("Failed to read NKit header: {}", e);
@@ -297,5 +298,37 @@ impl JunkBits {
 
     fn len(block_size: u32) -> usize {
         DL_DVD_SIZE.div_ceil(block_size as u64).div_ceil(8) as usize
+    }
+}
+
+pub struct ReadAdapter<'a> {
+    reader: &'a mut dyn DiscStream,
+    pos: u64,
+}
+
+impl<'a> ReadAdapter<'a> {
+    pub fn new(reader: &'a mut dyn DiscStream, offset: u64) -> Self { Self { reader, pos: offset } }
+}
+
+impl Read for ReadAdapter<'_> {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        self.reader.read_exact_at(buf, self.pos)?;
+        self.pos += buf.len() as u64;
+        Ok(())
+    }
+}
+
+impl Seek for ReadAdapter<'_> {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        self.pos = match pos {
+            io::SeekFrom::Start(pos) => pos,
+            io::SeekFrom::End(v) => self.reader.stream_len()?.saturating_add_signed(v),
+            io::SeekFrom::Current(v) => self.pos.saturating_add_signed(v),
+        };
+        Ok(self.pos)
     }
 }

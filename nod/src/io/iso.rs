@@ -1,7 +1,4 @@
-use std::{
-    io,
-    io::{BufRead, Read, Seek, SeekFrom},
-};
+use std::{io, io::BufRead};
 
 use crate::{
     Result, ResultContext,
@@ -25,7 +22,7 @@ pub struct BlockReaderISO {
 
 impl BlockReaderISO {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
-        let disc_size = inner.seek(SeekFrom::End(0)).context("Determining stream length")?;
+        let disc_size = inner.stream_len().context("Determining stream length")?;
         Ok(Box::new(Self { inner, disc_size }))
     }
 }
@@ -38,14 +35,13 @@ impl BlockReader for BlockReaderISO {
             return Ok(Block::sector(sector, BlockKind::None));
         }
 
-        self.inner.seek(SeekFrom::Start(pos))?;
         if pos + SECTOR_SIZE as u64 > self.disc_size {
             // If the last block is not a full sector, fill the rest with zeroes
             let read = (self.disc_size - pos) as usize;
-            self.inner.read_exact(&mut out[..read])?;
+            self.inner.read_exact_at(&mut out[..read], pos)?;
             out[read..].fill(0);
         } else {
-            self.inner.read_exact(out)?;
+            self.inner.read_exact_at(out, pos)?;
         }
 
         Ok(Block::sector(sector, BlockKind::Raw))

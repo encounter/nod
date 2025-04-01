@@ -44,7 +44,6 @@ md-5 = { workspace = true }
 miniz_oxide = { version = "0.8", optional = true }
 openssl = { version = "0.10", optional = true }
 polonius-the-crab = "0.4"
-rayon = "1.10"
 sha1 = { workspace = true }
 simple_moving_average = "1.0"
 thiserror = "2.0"

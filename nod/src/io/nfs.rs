@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io,
-    io::{BufReader, Read, Seek, SeekFrom},
+    io::{BufReader, Read},
     mem::size_of,
     path::{Component, Path, PathBuf},
     sync::Arc,
@@ -17,7 +17,7 @@ use crate::{
         block::{Block, BlockKind, BlockReader, NFS_MAGIC},
         split::SplitFileReader,
     },
-    read::DiscMeta,
+    read::{DiscMeta, DiscStream},
     util::{aes::aes_cbc_decrypt, array_ref_mut, read::read_arc, static_assert},
 };
 
@@ -116,8 +116,7 @@ impl BlockReader for BlockReaderNFS {
 
         // Read sector
         let offset = size_of::<NFSHeader>() as u64 + phys_sector as u64 * SECTOR_SIZE as u64;
-        self.inner.seek(SeekFrom::Start(offset))?;
-        self.inner.read_exact(out)?;
+        self.inner.read_exact_at(out, offset)?;
 
         // Decrypt
         let mut iv = [0u8; 0x10];

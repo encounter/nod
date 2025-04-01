@@ -1,6 +1,6 @@
 use std::{
     io,
-    io::{Read, Seek, SeekFrom},
+    io::{Seek, SeekFrom},
     mem::size_of,
     sync::Arc,
 };
@@ -28,7 +28,7 @@ use crate::{
         array_ref,
         digest::DigestManager,
         lfg::LaggedFibonacci,
-        read::{box_to_bytes, read_arc},
+        read::{box_to_bytes, read_arc_at},
         static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
@@ -58,8 +58,8 @@ pub struct BlockReaderCISO {
 impl BlockReaderCISO {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
         // Read header
-        inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
-        let header: Arc<CISOHeader> = read_arc(inner.as_mut()).context("Reading CISO header")?;
+        let header: Arc<CISOHeader> =
+            read_arc_at(inner.as_mut(), 0).context("Reading CISO header")?;
         if header.magic != CISO_MAGIC {
             return Err(Error::DiscFormat("Invalid CISO magic".to_string()));
         }
@@ -76,7 +76,7 @@ impl BlockReaderCISO {
             }
         }
         let file_size = SECTOR_SIZE as u64 + block as u64 * header.block_size.get() as u64;
-        let len = inner.seek(SeekFrom::End(0)).context("Determining stream length")?;
+        let len = inner.stream_len().context("Determining stream length")?;
         if file_size > len {
             return Err(Error::DiscFormat(format!(
                 "CISO file size mismatch: expected at least {} bytes, got {}",
@@ -86,8 +86,7 @@ impl BlockReaderCISO {
 
         // Read NKit header if present (after CISO data)
         let nkit_header = if len > file_size + 12 {
-            inner.seek(SeekFrom::Start(file_size)).context("Seeking to NKit header")?;
-            NKitHeader::try_read_from(inner.as_mut(), header.block_size.get(), true)
+            NKitHeader::try_read_from(inner.as_mut(), file_size, header.block_size.get(), true)
         } else {
             None
         };
@@ -119,8 +118,7 @@ impl BlockReader for BlockReaderCISO {
 
         // Read block
         let file_offset = size_of::<CISOHeader>() as u64 + phys_block as u64 * block_size as u64;
-        self.inner.seek(SeekFrom::Start(file_offset))?;
-        self.inner.read_exact(out)?;
+        self.inner.read_exact_at(out, file_offset)?;
 
         Ok(Block::new(block_idx, block_size, BlockKind::Raw))
     }
@@ -259,7 +257,7 @@ impl DiscWriter for DiscWriterCISO {
         header.magic = CISO_MAGIC;
         header.block_size = block_size.into();
         par_process(
-            || BlockProcessorCISO {
+            BlockProcessorCISO {
                 inner: self.inner.clone(),
                 block_size,
                 decrypted_block: <[u8]>::new_box_zeroed_with_elems(block_size as usize).unwrap(),

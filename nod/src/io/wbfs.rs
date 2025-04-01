@@ -1,6 +1,6 @@
 use std::{
     io,
-    io::{Read, Seek, SeekFrom},
+    io::{Seek, SeekFrom},
     mem::size_of,
     sync::Arc,
 };
@@ -28,7 +28,7 @@ use crate::{
         array_ref,
         digest::DigestManager,
         lfg::LaggedFibonacci,
-        read::{read_arc_slice, read_box_slice, read_from},
+        read::{read_arc_slice_at, read_at, read_box_slice_at},
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
 };
@@ -69,12 +69,11 @@ pub struct BlockReaderWBFS {
 
 impl BlockReaderWBFS {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
-        inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
-        let header: WBFSHeader = read_from(inner.as_mut()).context("Reading WBFS header")?;
+        let header: WBFSHeader = read_at(inner.as_mut(), 0).context("Reading WBFS header")?;
         if header.magic != WBFS_MAGIC {
             return Err(Error::DiscFormat("Invalid WBFS magic".to_string()));
         }
-        let file_len = inner.seek(SeekFrom::End(0)).context("Determining stream length")?;
+        let file_len = inner.stream_len().context("Determining stream length")?;
         let expected_file_len = header.num_sectors.get() as u64 * header.sector_size() as u64;
         if file_len != expected_file_len {
             return Err(Error::DiscFormat(format!(
@@ -83,12 +82,12 @@ impl BlockReaderWBFS {
             )));
         }
 
-        inner
-            .seek(SeekFrom::Start(size_of::<WBFSHeader>() as u64))
-            .context("Seeking to WBFS disc table")?;
-        let disc_table: Box<[u8]> =
-            read_box_slice(inner.as_mut(), header.sector_size() as usize - size_of::<WBFSHeader>())
-                .context("Reading WBFS disc table")?;
+        let disc_table: Box<[u8]> = read_box_slice_at(
+            inner.as_mut(),
+            header.sector_size() as usize - size_of::<WBFSHeader>(),
+            size_of::<WBFSHeader>() as u64,
+        )
+        .context("Reading WBFS disc table")?;
         if disc_table[0] != 1 {
             return Err(Error::DiscFormat("WBFS doesn't contain a disc".to_string()));
         }
@@ -97,15 +96,20 @@ impl BlockReaderWBFS {
         }
 
         // Read WBFS LBA map
-        inner
-            .seek(SeekFrom::Start(header.sector_size() as u64 + DISC_HEADER_SIZE as u64))
-            .context("Seeking to WBFS LBA table")?; // Skip header
-        let block_map: Arc<[U16]> = read_arc_slice(inner.as_mut(), header.max_blocks() as usize)
-            .context("Reading WBFS LBA table")?;
+        let block_map: Arc<[U16]> = read_arc_slice_at(
+            inner.as_mut(),
+            header.max_blocks() as usize,
+            header.sector_size() as u64 + DISC_HEADER_SIZE as u64,
+        )
+        .context("Reading WBFS LBA table")?;
 
         // Read NKit header if present (always at 0x10000)
-        inner.seek(SeekFrom::Start(NKIT_HEADER_OFFSET)).context("Seeking to NKit header")?;
-        let nkit_header = NKitHeader::try_read_from(inner.as_mut(), header.block_size(), true);
+        let nkit_header = NKitHeader::try_read_from(
+            inner.as_mut(),
+            NKIT_HEADER_OFFSET,
+            header.block_size(),
+            true,
+        );
 
         Ok(Box::new(Self { inner, header, block_map, nkit_header }))
     }
@@ -134,8 +138,7 @@ impl BlockReader for BlockReaderWBFS {
 
         // Read block
         let block_start = block_size as u64 * phys_block as u64;
-        self.inner.seek(SeekFrom::Start(block_start))?;
-        self.inner.read_exact(out)?;
+        self.inner.read_exact_at(out, block_start)?;
 
         Ok(Block::new(block_idx, block_size, BlockKind::Raw))
     }
@@ -271,7 +274,7 @@ impl DiscWriterWBFS {
             return Err(Error::Other("WBFS info too large for block".to_string()));
         }
 
-        inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
+        inner.rewind().context("Seeking to start")?;
         Ok(Box::new(Self { inner, header, disc_table, block_count }))
     }
 }
@@ -307,7 +310,7 @@ impl DiscWriter for DiscWriterWBFS {
 
         let mut phys_block = 1;
         par_process(
-            || BlockProcessorWBFS {
+            BlockProcessorWBFS {
                 inner: self.inner.clone(),
                 header: self.header.clone(),
                 decrypted_block: <[u8]>::new_box_zeroed_with_elems(block_size as usize).unwrap(),

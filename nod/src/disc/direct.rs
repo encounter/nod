@@ -11,6 +11,7 @@ use crate::{
     common::KeyBytes,
     disc::{DiscHeader, SECTOR_SIZE, wii::SECTOR_DATA_SIZE},
     io::block::{Block, BlockReader},
+    read::{PartitionMeta, PartitionReader},
     util::impl_read_for_bufread,
 };
 
@@ -135,4 +136,10 @@ impl Seek for DirectDiscReader {
     }
 
     fn stream_position(&mut self) -> io::Result<u64> { Ok(self.pos) }
+}
+
+impl PartitionReader for DirectDiscReader {
+    fn is_wii(&self) -> bool { unimplemented!() }
+
+    fn meta(&mut self) -> Result<PartitionMeta> { unimplemented!() }
 }

@@ -252,23 +252,14 @@ impl DiscReader {
         match &self.disc_data {
             DiscReaderData::GameCube { .. } => {
                 if index == 0 {
-                    Ok(PartitionReaderGC::new(
-                        self.io.clone(),
-                        self.preloader.clone(),
-                        self.disc_size(),
-                    )?)
+                    Ok(PartitionReaderGC::new(self.preloader.clone(), self.disc_size())?)
                 } else {
                     Err(Error::DiscFormat("GameCube discs only have one partition".to_string()))
                 }
             }
             DiscReaderData::Wii { partitions, .. } => {
                 if let Some(part) = partitions.get(index) {
-                    Ok(PartitionReaderWii::new(
-                        self.io.clone(),
-                        self.preloader.clone(),
-                        part,
-                        options,
-                    )?)
+                    Ok(PartitionReaderWii::new(self.preloader.clone(), part, options)?)
                 } else {
                     Err(Error::DiscFormat(format!("Partition {index} not found")))
                 }
@@ -286,23 +277,14 @@ impl DiscReader {
         match &self.disc_data {
             DiscReaderData::GameCube { .. } => {
                 if kind == PartitionKind::Data {
-                    Ok(PartitionReaderGC::new(
-                        self.io.clone(),
-                        self.preloader.clone(),
-                        self.disc_size(),
-                    )?)
+                    Ok(PartitionReaderGC::new(self.preloader.clone(), self.disc_size())?)
                 } else {
                     Err(Error::DiscFormat("GameCube discs only have a data partition".to_string()))
                 }
             }
             DiscReaderData::Wii { partitions, .. } => {
                 if let Some(part) = partitions.iter().find(|v| v.kind == kind) {
-                    Ok(PartitionReaderWii::new(
-                        self.io.clone(),
-                        self.preloader.clone(),
-                        part,
-                        options,
-                    )?)
+                    Ok(PartitionReaderWii::new(self.preloader.clone(), part, options)?)
                 } else {
                     Err(Error::DiscFormat(format!("Partition type {kind} not found")))
                 }

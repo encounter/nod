@@ -77,7 +77,7 @@ impl LaggedFibonacci {
         out[16] ^= (out[0] >> 9) ^ (out[16] << 23);
     }
 
-    /// Same as [`generate_seed`], but ensures the resulting seed is big-endian.
+    /// Same as [`Self::generate_seed`], but ensures the resulting seed is big-endian.
     pub fn generate_seed_be(
         out: &mut [u32; SEED_SIZE],
         disc_id: [u8; 4],

@@ -18,7 +18,6 @@ use crate::{
         gcn::{PartitionReaderGC, read_part_meta},
         preloader::{Preloader, SectorGroup, SectorGroupRequest, fetch_sector_group},
     },
-    io::block::BlockReader,
     read::{PartitionEncryption, PartitionMeta, PartitionOptions, PartitionReader},
     util::{
         aes::aes_cbc_decrypt,
@@ -300,7 +299,6 @@ impl WiiPartitionHeader {
 }
 
 pub(crate) struct PartitionReaderWii {
-    io: Box<dyn BlockReader>,
     preloader: Arc<Preloader>,
     partition: PartitionInfo,
     pos: u64,
@@ -312,7 +310,6 @@ pub(crate) struct PartitionReaderWii {
 impl Clone for PartitionReaderWii {
     fn clone(&self) -> Self {
         Self {
-            io: self.io.clone(),
             preloader: self.preloader.clone(),
             partition: self.partition.clone(),
             pos: 0,
@@ -325,13 +322,11 @@ impl Clone for PartitionReaderWii {
 
 impl PartitionReaderWii {
     pub fn new(
-        io: Box<dyn BlockReader>,
         preloader: Arc<Preloader>,
         partition: &PartitionInfo,
         options: &PartitionOptions,
     ) -> Result<Box<Self>> {
         let mut reader = Self {
-            io,
             preloader,
             partition: partition.clone(),
             pos: 0,
@@ -498,12 +493,12 @@ impl PartitionReader for PartitionReaderWii {
         if let Some(meta) = &self.meta {
             return Ok(meta.clone());
         }
-        self.seek(SeekFrom::Start(0)).context("Seeking to partition header")?;
+        self.rewind().context("Seeking to partition header")?;
         let mut meta = read_part_meta(self, true)?;
         meta.raw_ticket = Some(Arc::from(self.partition.header.ticket.as_bytes()));
 
         // Read TMD, cert chain, and H3 table
-        let mut reader = PartitionReaderGC::new(self.io.clone(), self.preloader.clone(), u64::MAX)?;
+        let mut reader = PartitionReaderGC::new(self.preloader.clone(), u64::MAX)?;
         let offset = self.partition.start_sector as u64 * SECTOR_SIZE as u64;
         meta.raw_tmd = if self.partition.header.tmd_size() != 0 {
             reader

@@ -570,7 +570,7 @@ fn in_memory_test(
             Ok(())
         }
     })?;
-    let disc_stream = writer.into_stream(PartitionFileReader { partition, meta })?;
+    let disc_stream = writer.into_cloneable_stream(PartitionFileReader { partition, meta })?;
     let disc_reader = DiscReader::new_stream(disc_stream, &DiscOptions::default())?;
     let disc_writer = DiscWriter::new(disc_reader, &FormatOptions::default())?;
     let process_options = ProcessOptions { digest_crc32: true, ..Default::default() };

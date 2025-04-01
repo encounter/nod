@@ -1,19 +1,15 @@
 use std::{
     fs::File,
     io,
-    io::{BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
 };
 
-use tracing::instrument;
-
-use crate::{ErrorContext, Result, ResultContext};
+use crate::{ErrorContext, Result, ResultContext, read::DiscStream};
 
 #[derive(Debug)]
 pub struct SplitFileReader {
     files: Vec<Split<PathBuf>>,
-    open_file: Option<Split<BufReader<File>>>,
-    pos: u64,
+    open_file: Option<Split<File>>,
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +56,7 @@ fn split_path_3(input: &Path, index: u32) -> PathBuf {
 }
 
 impl SplitFileReader {
-    pub fn empty() -> Self { Self { files: Vec::new(), open_file: None, pos: 0 } }
+    pub fn empty() -> Self { Self { files: Vec::new(), open_file: Default::default() } }
 
     pub fn new(path: &Path) -> Result<Self> {
         let mut files = vec![];
@@ -90,7 +86,7 @@ impl SplitFileReader {
                 break;
             }
         }
-        Ok(Self { files, open_file: None, pos: 0 })
+        Ok(Self { files, open_file: Default::default() })
     }
 
     pub fn add(&mut self, path: &Path) -> Result<()> {
@@ -102,54 +98,37 @@ impl SplitFileReader {
     }
 
     pub fn len(&self) -> u64 { self.files.last().map_or(0, |f| f.begin + f.size) }
-
-    fn check_open_file(&mut self) -> io::Result<Option<&mut Split<BufReader<File>>>> {
-        if self.open_file.is_none() || !self.open_file.as_ref().unwrap().contains(self.pos) {
-            self.open_file = if let Some(split) = self.files.iter().find(|f| f.contains(self.pos)) {
-                let mut file = BufReader::new(File::open(&split.inner)?);
-                // log::info!("Opened file {} at pos {}", split.inner.display(), self.pos);
-                file.seek(SeekFrom::Start(self.pos - split.begin))?;
-                Some(Split { inner: file, begin: split.begin, size: split.size })
-            } else {
-                None
-            };
-        }
-        Ok(self.open_file.as_mut())
-    }
-}
-
-impl Read for SplitFileReader {
-    #[instrument(name = "SplitFileReader::read", skip_all)]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let pos = self.pos;
-        let Some(split) = self.check_open_file()? else {
-            return Ok(0);
-        };
-        let to_read = buf.len().min((split.begin + split.size - pos) as usize);
-        let read = split.inner.read(&mut buf[..to_read])?;
-        self.pos += read as u64;
-        Ok(read)
-    }
-}
-
-impl Seek for SplitFileReader {
-    #[instrument(name = "SplitFileReader::seek", skip_all)]
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        self.pos = match pos {
-            SeekFrom::Start(pos) => pos,
-            SeekFrom::Current(offset) => self.pos.saturating_add_signed(offset),
-            SeekFrom::End(offset) => self.len().saturating_add_signed(offset),
-        };
-        if let Some(split) = &mut self.open_file {
-            if split.contains(self.pos) {
-                // Seek within the open file
-                split.inner.seek(SeekFrom::Start(self.pos - split.begin))?;
-            }
-        }
-        Ok(self.pos)
-    }
 }
 
 impl Clone for SplitFileReader {
-    fn clone(&self) -> Self { Self { files: self.files.clone(), open_file: None, pos: 0 } }
+    fn clone(&self) -> Self { Self { files: self.files.clone(), open_file: Default::default() } }
+}
+
+impl DiscStream for SplitFileReader {
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        let split = if self.open_file.as_ref().is_none_or(|s| !s.contains(offset)) {
+            let split = if let Some(split) = self.files.iter().find(|f| f.contains(offset)) {
+                let file = File::open(&split.inner)?;
+                Split { inner: file, begin: split.begin, size: split.size }
+            } else {
+                return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+            };
+            self.open_file.insert(split)
+        } else {
+            self.open_file.as_mut().unwrap()
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            split.inner.read_exact_at(buf, offset)
+        }
+        #[cfg(not(unix))]
+        {
+            use std::io::{Read, Seek, SeekFrom};
+            split.inner.seek(SeekFrom::Start(offset - split.begin))?;
+            split.inner.read_exact(buf)
+        }
+    }
+
+    fn stream_len(&mut self) -> io::Result<u64> { Ok(self.len()) }
 }

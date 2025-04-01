@@ -110,7 +110,7 @@ impl DiscWriter {
     #[inline]
     pub fn process(
         &self,
-        mut data_callback: impl FnMut(Bytes, u64, u64) -> std::io::Result<()> + Send,
+        mut data_callback: impl FnMut(Bytes, u64, u64) -> std::io::Result<()>,
         options: &ProcessOptions,
     ) -> Result<DiscFinalization> {
         self.inner.process(&mut data_callback, options)

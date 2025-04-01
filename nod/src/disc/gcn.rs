@@ -14,8 +14,7 @@ use crate::{
         SECTOR_SIZE,
         preloader::{Preloader, SectorGroup, SectorGroupRequest, fetch_sector_group},
     },
-    io::block::BlockReader,
-    read::{DiscStream, PartitionEncryption, PartitionMeta, PartitionReader},
+    read::{PartitionEncryption, PartitionMeta, PartitionReader},
     util::{
         impl_read_for_bufread,
         read::{read_arc, read_arc_slice, read_from},
@@ -23,7 +22,6 @@ use crate::{
 };
 
 pub struct PartitionReaderGC {
-    io: Box<dyn BlockReader>,
     preloader: Arc<Preloader>,
     pos: u64,
     disc_size: u64,
@@ -34,7 +32,6 @@ pub struct PartitionReaderGC {
 impl Clone for PartitionReaderGC {
     fn clone(&self) -> Self {
         Self {
-            io: self.io.clone(),
             preloader: self.preloader.clone(),
             pos: 0,
             disc_size: self.disc_size,
@@ -45,19 +42,8 @@ impl Clone for PartitionReaderGC {
 }
 
 impl PartitionReaderGC {
-    pub fn new(
-        inner: Box<dyn BlockReader>,
-        preloader: Arc<Preloader>,
-        disc_size: u64,
-    ) -> Result<Box<Self>> {
-        Ok(Box::new(Self {
-            io: inner,
-            preloader,
-            pos: 0,
-            disc_size,
-            sector_group: None,
-            meta: None,
-        }))
+    pub fn new(preloader: Arc<Preloader>, disc_size: u64) -> Result<Box<Self>> {
+        Ok(Box::new(Self { preloader, pos: 0, disc_size, sector_group: None, meta: None }))
     }
 }
 
@@ -131,9 +117,7 @@ impl PartitionReader for PartitionReaderGC {
 }
 
 pub(crate) fn read_dol(
-    // TODO: replace with &dyn mut DiscStream when trait_upcasting is stabilized
-    // https://github.com/rust-lang/rust/issues/65991
-    reader: &mut (impl DiscStream + ?Sized),
+    reader: &mut dyn PartitionReader,
     boot_header: &BootHeader,
     is_wii: bool,
 ) -> Result<Arc<[u8]>> {
@@ -153,9 +137,7 @@ pub(crate) fn read_dol(
 }
 
 pub(crate) fn read_fst(
-    // TODO: replace with &dyn mut DiscStream when trait_upcasting is stabilized
-    // https://github.com/rust-lang/rust/issues/65991
-    reader: &mut (impl DiscStream + ?Sized),
+    reader: &mut dyn PartitionReader,
     boot_header: &BootHeader,
     is_wii: bool,
 ) -> Result<Arc<[u8]>> {
@@ -173,7 +155,7 @@ pub(crate) fn read_fst(
     Ok(raw_fst)
 }
 
-pub(crate) fn read_apploader(reader: &mut dyn DiscStream) -> Result<Arc<[u8]>> {
+pub(crate) fn read_apploader(reader: &mut dyn PartitionReader) -> Result<Arc<[u8]>> {
     reader
         .seek(SeekFrom::Start(BOOT_SIZE as u64 + BI2_SIZE as u64))
         .context("Seeking to apploader offset")?;
@@ -190,7 +172,10 @@ pub(crate) fn read_apploader(reader: &mut dyn DiscStream) -> Result<Arc<[u8]>> {
     Ok(Arc::from(raw_apploader))
 }
 
-pub(crate) fn read_part_meta(reader: &mut dyn DiscStream, is_wii: bool) -> Result<PartitionMeta> {
+pub(crate) fn read_part_meta(
+    reader: &mut dyn PartitionReader,
+    is_wii: bool,
+) -> Result<PartitionMeta> {
     // boot.bin
     let raw_boot: Arc<[u8; BOOT_SIZE]> = read_arc(reader).context("Reading boot.bin")?;
     let boot_header = BootHeader::ref_from_bytes(&raw_boot[BB2_OFFSET..]).unwrap();

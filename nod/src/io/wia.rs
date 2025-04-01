@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap, hash_map::Entry},
     io,
-    io::{Read, Seek, SeekFrom},
+    io::{Seek, SeekFrom},
     mem::size_of,
     sync::Arc,
     time::Instant,
@@ -34,7 +34,10 @@ use crate::{
         compress::{Compressor, DecompressionKind, Decompressor},
         digest::{DigestManager, sha1_hash, xxh64_hash},
         lfg::{LaggedFibonacci, SEED_SIZE, SEED_SIZE_BYTES},
-        read::{read_arc_slice, read_from, read_vec},
+        read::{
+            read_arc_slice_at, read_at, read_box_slice_at, read_into_arc_slice,
+            read_into_box_slice, read_vec_at,
+        },
         static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
@@ -588,16 +591,19 @@ fn verify_hash(buf: &[u8], expected: &HashBytes) -> Result<()> {
 impl BlockReaderWIA {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<Self>> {
         // Load & verify file header
-        inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
         let header: WIAFileHeader =
-            read_from(inner.as_mut()).context("Reading WIA/RVZ file header")?;
+            read_at(inner.as_mut(), 0).context("Reading WIA/RVZ file header")?;
         header.validate()?;
         let is_rvz = header.is_rvz();
         debug!("Header: {:?}", header);
 
         // Load & verify disc header
-        let mut disc_buf: Vec<u8> = read_vec(inner.as_mut(), header.disc_size.get() as usize)
-            .context("Reading WIA/RVZ disc header")?;
+        let mut disc_buf: Vec<u8> = read_vec_at(
+            inner.as_mut(),
+            header.disc_size.get() as usize,
+            size_of::<WIAFileHeader>() as u64,
+        )
+        .context("Reading WIA/RVZ disc header")?;
         verify_hash(&disc_buf, &header.disc_hash)?;
         disc_buf.resize(size_of::<WIADisc>(), 0);
         let disc = WIADisc::read_from_bytes(disc_buf.as_slice()).unwrap();
@@ -605,15 +611,20 @@ impl BlockReaderWIA {
         debug!("Disc: {:?}", disc);
 
         // Read NKit header if present (after disc header)
-        let nkit_header = NKitHeader::try_read_from(inner.as_mut(), disc.chunk_size.get(), false);
+        let nkit_header = NKitHeader::try_read_from(
+            inner.as_mut(),
+            size_of::<WIAFileHeader>() as u64 + header.disc_size.get() as u64,
+            disc.chunk_size.get(),
+            false,
+        );
 
         // Load & verify partition headers
-        inner
-            .seek(SeekFrom::Start(disc.partition_offset.get()))
-            .context("Seeking to WIA/RVZ partition headers")?;
-        let partitions: Arc<[WIAPartition]> =
-            read_arc_slice(inner.as_mut(), disc.num_partitions.get() as usize)
-                .context("Reading WIA/RVZ partition headers")?;
+        let partitions: Arc<[WIAPartition]> = read_arc_slice_at(
+            inner.as_mut(),
+            disc.num_partitions.get() as usize,
+            disc.partition_offset.get(),
+        )
+        .context("Reading WIA/RVZ partition headers")?;
         verify_hash(partitions.as_ref().as_bytes(), &disc.partition_hash)?;
         debug!("Partitions: {:?}", partitions);
 
@@ -622,15 +633,18 @@ impl BlockReaderWIA {
 
         // Load raw data headers
         let raw_data: Arc<[WIARawData]> = {
-            inner
-                .seek(SeekFrom::Start(disc.raw_data_offset.get()))
-                .context("Seeking to WIA/RVZ raw data headers")?;
-            let mut reader = decompressor
-                .kind
-                .wrap(inner.as_mut().take(disc.raw_data_size.get() as u64))
-                .context("Creating WIA/RVZ decompressor")?;
-            read_arc_slice(&mut reader, disc.num_raw_data.get() as usize)
-                .context("Reading WIA/RVZ raw data headers")?
+            let compressed_data = read_box_slice_at::<u8, _>(
+                inner.as_mut(),
+                disc.raw_data_size.get() as usize,
+                disc.raw_data_offset.get(),
+            )
+            .context("Reading WIA/RVZ raw data headers")?;
+            read_into_arc_slice(disc.num_raw_data.get() as usize, |out| {
+                decompressor
+                    .decompress(&compressed_data, out)
+                    .context("Decompressing WIA/RVZ raw data headers")
+                    .map(|_| ())
+            })?
         };
         // Validate raw data alignment
         for (idx, rd) in raw_data.iter().enumerate() {
@@ -652,20 +666,27 @@ impl BlockReaderWIA {
 
         // Load group headers
         let groups = {
-            inner
-                .seek(SeekFrom::Start(disc.group_offset.get()))
-                .context("Seeking to WIA/RVZ group headers")?;
-            let mut reader = decompressor
-                .kind
-                .wrap(inner.as_mut().take(disc.group_size.get() as u64))
-                .context("Creating WIA/RVZ decompressor")?;
+            let compressed_data = read_box_slice_at::<u8, _>(
+                inner.as_mut(),
+                disc.group_size.get() as usize,
+                disc.group_offset.get(),
+            )
+            .context("Reading WIA/RVZ group headers")?;
             if is_rvz {
-                read_arc_slice(&mut reader, disc.num_groups.get() as usize)
-                    .context("Reading WIA/RVZ group headers")?
+                read_into_arc_slice(disc.num_groups.get() as usize, |out| {
+                    decompressor
+                        .decompress(&compressed_data, out)
+                        .context("Decompressing WIA/RVZ group headers")
+                        .map(|_| ())
+                })?
             } else {
-                let wia_groups: Arc<[WIAGroup]> =
-                    read_arc_slice(&mut reader, disc.num_groups.get() as usize)
-                        .context("Reading WIA/RVZ group headers")?;
+                let wia_groups =
+                    read_into_box_slice::<WIAGroup, _>(disc.num_groups.get() as usize, |out| {
+                        decompressor
+                            .decompress(&compressed_data, out)
+                            .context("Decompressing WIA/RVZ group headers")
+                            .map(|_| ())
+                    })?;
                 wia_groups.iter().map(RVZGroup::from).collect()
             }
         };
@@ -878,8 +899,7 @@ impl BlockReader for BlockReaderWIA {
         let group_data_start = group.data_offset.get() as u64 * 4;
         let mut group_data = BytesMut::zeroed(group.data_size() as usize);
         let io_start = Instant::now();
-        self.inner.seek(SeekFrom::Start(group_data_start))?;
-        self.inner.read_exact(group_data.as_mut())?;
+        self.inner.read_exact_at(group_data.as_mut(), group_data_start)?;
         let io_duration = io_start.elapsed();
         let mut group_data = group_data.freeze();
 
@@ -1698,7 +1718,7 @@ impl DiscWriter for DiscWriterWIA {
         let mut group_hashes = HashMap::<u64, u32>::new();
         let mut reuse_size = 0;
         par_process(
-            || BlockProcessorWIA {
+            BlockProcessorWIA {
                 inner: self.inner.clone(),
                 header: self.header.clone(),
                 disc: self.disc.clone(),

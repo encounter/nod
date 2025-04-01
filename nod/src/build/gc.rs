@@ -15,11 +15,11 @@ use crate::{
         WII_MAGIC,
         fst::{Fst, FstBuilder},
     },
-    read::DiscStream,
+    read::{CloneableStream, DiscStream, NonCloneableStream},
     util::{Align, array_ref, array_ref_mut, lfg::LaggedFibonacci},
 };
 
-pub trait FileCallback: Clone + Send + Sync {
+pub trait FileCallback: Send {
     fn read_file(&mut self, out: &mut [u8], name: &str, offset: u64) -> io::Result<()>;
 }
 
@@ -629,15 +629,26 @@ impl GCPartitionWriter {
         Ok(())
     }
 
-    pub fn into_stream<Cb>(self, file_callback: Cb) -> Result<Box<dyn DiscStream>>
-    where Cb: FileCallback + 'static {
-        Ok(Box::new(GCPartitionStream::new(
+    pub fn into_cloneable_stream<Cb>(self, file_callback: Cb) -> Result<Box<dyn DiscStream>>
+    where Cb: FileCallback + Clone + 'static {
+        Ok(Box::new(CloneableStream::new(GCPartitionStream::new(
             file_callback,
             Arc::from(self.write_info),
             self.disc_size,
             self.disc_id,
             self.disc_num,
-        )))
+        ))))
+    }
+
+    pub fn into_non_cloneable_stream<Cb>(self, file_callback: Cb) -> Result<Box<dyn DiscStream>>
+    where Cb: FileCallback + 'static {
+        Ok(Box::new(NonCloneableStream::new(GCPartitionStream::new(
+            file_callback,
+            Arc::from(self.write_info),
+            self.disc_size,
+            self.disc_id,
+            self.disc_num,
+        ))))
     }
 }
 

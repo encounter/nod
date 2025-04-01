@@ -134,7 +134,7 @@
 //! // Some disc writers calculate data during processing.
 //! // If the finalization returns header data, seek to the beginning of the file and write it.
 //! if !finalization.header.is_empty() {
-//!     output_file.seek(std::io::SeekFrom::Start(0))
+//!     output_file.rewind()
 //!         .expect("Failed to seek");
 //!     output_file.write_all(finalization.header.as_ref())
 //!         .expect("Failed to write header");

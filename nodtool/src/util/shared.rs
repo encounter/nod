@@ -1,7 +1,7 @@
 use std::{
     fmt,
     fs::File,
-    io::{Seek, SeekFrom, Write},
+    io::{Seek, Write},
     path::Path,
 };
 
@@ -130,7 +130,7 @@ pub fn convert_and_verify(
     // Finalize disc writer
     if !finalization.header.is_empty() {
         if let Some(file) = &mut file {
-            file.seek(SeekFrom::Start(0)).context("Seeking to start of output file")?;
+            file.rewind().context("Seeking to start of output file")?;
             file.write_all(finalization.header.as_ref()).context("Writing header")?;
         } else {
             return Err(nod::Error::Other("No output file, but requires finalization".to_string()));

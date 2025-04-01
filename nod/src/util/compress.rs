@@ -1,4 +1,4 @@
-use std::{io, io::Read};
+use std::io;
 
 use tracing::instrument;
 
@@ -181,31 +181,6 @@ impl DecompressionKind {
             WIACompression::Zstandard => Ok(Self::Zstandard),
             comp => Err(Error::DiscFormat(format!("Unsupported WIA/RVZ compression: {:?}", comp))),
         }
-    }
-
-    pub fn wrap<'a, R>(&mut self, reader: R) -> io::Result<Box<dyn Read + 'a>>
-    where R: Read + 'a {
-        Ok(match self {
-            DecompressionKind::None => Box::new(reader),
-            #[cfg(feature = "compress-zlib")]
-            DecompressionKind::Deflate => unimplemented!("DecompressionKind::Deflate.wrap"),
-            #[cfg(feature = "compress-bzip2")]
-            DecompressionKind::Bzip2 => Box::new(bzip2::read::BzDecoder::new(reader)),
-            #[cfg(feature = "compress-lzma")]
-            DecompressionKind::Lzma(data) => {
-                use lzma_util::{lzma_props_decode, new_lzma_decoder};
-                let stream = new_lzma_decoder(&lzma_props_decode(data)?)?;
-                Box::new(liblzma::read::XzDecoder::new_stream(reader, stream))
-            }
-            #[cfg(feature = "compress-lzma")]
-            DecompressionKind::Lzma2(data) => {
-                use lzma_util::{lzma2_props_decode, new_lzma2_decoder};
-                let stream = new_lzma2_decoder(&lzma2_props_decode(data)?)?;
-                Box::new(liblzma::read::XzDecoder::new_stream(reader, stream))
-            }
-            #[cfg(feature = "compress-zstd")]
-            DecompressionKind::Zstandard => Box::new(zstd::stream::Decoder::new(reader)?),
-        })
     }
 }
 

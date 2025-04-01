@@ -1,8 +1,8 @@
 //! [`DiscReader`] and associated types.
 use std::{
-    io::{BufRead, Read, Seek},
+    io::{self, BufRead, Read, Seek},
     path::Path,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use dyn_clone::DynClone;
@@ -62,12 +62,106 @@ pub struct PartitionOptions {
     pub validate_hashes: bool,
 }
 
-/// Required trait bounds for reading disc images.
-pub trait DiscStream: Read + Seek + DynClone + Send + Sync {}
+/// Trait for reading disc images.
+///
+/// Disc images are read in blocks, often in the hundred kilobyte to several megabyte range,
+/// making the standard [`Read`] and [`Seek`] traits a poor fit for this use case. This trait
+/// provides a simplified interface for reading disc images, with a focus on large, random
+/// access reads.
+///
+/// For multithreading support, an implementation must be [`Send`] and [`Clone`].
+/// [`Sync`] is _not_ required: the stream will be cloned if used in multiple threads.
+///
+/// Rather than implement this trait directly, you'll likely use one of the following
+/// [`DiscReader`] functions:
+/// - [`DiscReader::new`]: to open a disc image from a file path.
+/// - [`DiscReader::new_stream`]: when you can provide a [`Box<dyn DiscStream>`].
+/// - [`DiscReader::new_from_cloneable_read`]: when you can provide a [`Read`] + [`Seek`] +
+///   [`Clone`] stream.
+/// - [`DiscReader::new_from_non_cloneable_read`]: when you can provide a [`Read`] + [`Seek`]
+///   stream. (Accesses will be synchronized, limiting multithreaded performance.)
+pub trait DiscStream: DynClone + Send {
+    /// Reads the exact number of bytes required to fill `buf` from the given offset.
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()>;
 
-impl<T> DiscStream for T where T: Read + Seek + DynClone + Send + Sync + ?Sized {}
+    /// Returns the length of the stream in bytes.
+    fn stream_len(&mut self) -> io::Result<u64>;
+}
 
 dyn_clone::clone_trait_object!(DiscStream);
+
+impl<T> DiscStream for T
+where T: AsRef<[u8]> + Send + Clone
+{
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        let data = self.as_ref();
+        let len = data.len() as u64;
+        let end = offset + buf.len() as u64;
+        if offset >= len || end > len {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+        }
+        buf.copy_from_slice(&data[offset as usize..end as usize]);
+        Ok(())
+    }
+
+    fn stream_len(&mut self) -> io::Result<u64> { Ok(self.as_ref().len() as u64) }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CloneableStream<T>(pub T)
+where T: Read + Seek + Clone + Send;
+
+impl<T> CloneableStream<T>
+where T: Read + Seek + Clone + Send
+{
+    pub fn new(stream: T) -> Self { Self(stream) }
+}
+
+impl<T> DiscStream for CloneableStream<T>
+where T: Read + Seek + Clone + Send
+{
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        self.0.seek(io::SeekFrom::Start(offset))?;
+        self.0.read_exact(buf)
+    }
+
+    fn stream_len(&mut self) -> io::Result<u64> { self.0.seek(io::SeekFrom::End(0)) }
+}
+
+#[derive(Debug)]
+pub(crate) struct NonCloneableStream<T>(pub Arc<Mutex<T>>)
+where T: Read + Seek + Send;
+
+impl<T> Clone for NonCloneableStream<T>
+where T: Read + Seek + Send
+{
+    fn clone(&self) -> Self { Self(self.0.clone()) }
+}
+
+impl<T> NonCloneableStream<T>
+where T: Read + Seek + Send
+{
+    pub fn new(stream: T) -> Self { Self(Arc::new(Mutex::new(stream))) }
+
+    fn lock(&self) -> io::Result<std::sync::MutexGuard<'_, T>> {
+        self.0.lock().map_err(|_| io::Error::other("NonCloneableStream mutex poisoned"))
+    }
+}
+
+impl<T> DiscStream for NonCloneableStream<T>
+where T: Read + Seek + Send
+{
+    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        let mut stream = self.lock()?;
+        stream.seek(io::SeekFrom::Start(offset))?;
+        stream.read_exact(buf)
+    }
+
+    fn stream_len(&mut self) -> io::Result<u64> {
+        let mut stream = self.lock()?;
+        stream.seek(io::SeekFrom::End(0))
+    }
+}
 
 /// An open disc image and read stream.
 ///
@@ -79,24 +173,44 @@ pub struct DiscReader {
 
 impl DiscReader {
     /// Opens a disc image from a file path.
-    #[inline]
     pub fn new<P: AsRef<Path>>(path: P, options: &DiscOptions) -> Result<DiscReader> {
         let io = block::open(path.as_ref())?;
         let inner = disc::reader::DiscReader::new(io, options)?;
         Ok(DiscReader { inner })
     }
 
-    /// Opens a disc image from a read stream.
-    #[inline]
+    /// Opens a disc image from a [`DiscStream`]. This allows low-overhead, multithreaded
+    /// access to disc images stored in memory, archives, or other non-file sources.
+    ///
+    /// See [`DiscStream`] for more information.
     pub fn new_stream(stream: Box<dyn DiscStream>, options: &DiscOptions) -> Result<DiscReader> {
         let io = block::new(stream)?;
         let reader = disc::reader::DiscReader::new(io, options)?;
         Ok(DiscReader { inner: reader })
     }
 
+    /// Opens a disc image from a [`Read`] + [`Seek`] stream that can be cloned.
+    ///
+    /// The stream will be cloned for each thread that reads from it, allowing for multithreaded
+    /// access (e.g. for preloading blocks during reading or parallel block processing during
+    /// conversion).
+    pub fn new_from_cloneable_read<R>(stream: R, options: &DiscOptions) -> Result<DiscReader>
+    where R: Read + Seek + Clone + Send + 'static {
+        Self::new_stream(Box::new(CloneableStream::new(stream)), options)
+    }
+
+    /// Opens a disc image from a [`Read`] + [`Seek`] stream that cannot be cloned.
+    ///
+    /// Multithreaded accesses will be synchronized, which will limit performance (e.g. for
+    /// preloading blocks during reading or parallel block processing during conversion).
+    pub fn new_from_non_cloneable_read<R>(stream: R, options: &DiscOptions) -> Result<DiscReader>
+    where R: Read + Seek + Send + 'static {
+        Self::new_stream(Box::new(NonCloneableStream::new(stream)), options)
+    }
+
     /// Detects the format of a disc image from a read stream.
     #[inline]
-    pub fn detect<R>(stream: &mut R) -> std::io::Result<Option<Format>>
+    pub fn detect<R>(stream: &mut R) -> io::Result<Option<Format>>
     where R: Read + ?Sized {
         block::detect(stream)
     }
@@ -155,7 +269,7 @@ impl DiscReader {
 
 impl BufRead for DiscReader {
     #[inline]
-    fn fill_buf(&mut self) -> std::io::Result<&[u8]> { self.inner.fill_buf() }
+    fn fill_buf(&mut self) -> io::Result<&[u8]> { self.inner.fill_buf() }
 
     #[inline]
     fn consume(&mut self, amt: usize) { self.inner.consume(amt) }
@@ -163,12 +277,12 @@ impl BufRead for DiscReader {
 
 impl Read for DiscReader {
     #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> { self.inner.read(buf) }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.inner.read(buf) }
 }
 
 impl Seek for DiscReader {
     #[inline]
-    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> { self.inner.seek(pos) }
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> { self.inner.seek(pos) }
 }
 
 /// Extra metadata about the underlying disc file format.
@@ -199,7 +313,7 @@ pub struct DiscMeta {
 }
 
 /// An open disc partition.
-pub trait PartitionReader: BufRead + DiscStream {
+pub trait PartitionReader: DynClone + BufRead + Seek + Send {
     /// Whether this is a Wii partition. (GameCube otherwise)
     fn is_wii(&self) -> bool;
 
@@ -246,10 +360,10 @@ impl dyn PartitionReader + '_ {
     ///     Ok(())
     /// }
     /// ```
-    pub fn open_file(&mut self, node: Node) -> std::io::Result<FileReader> {
+    pub fn open_file(&mut self, node: Node) -> io::Result<FileReader> {
         if !node.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
                 "Node is not a file".to_string(),
             ));
         }
@@ -279,21 +393,20 @@ impl dyn PartitionReader {
     ///     let fst = meta.fst()?;
     ///     if let Some((_, node)) = fst.find("/disc.tgc") {
     ///         let file: OwnedFileReader = partition
-    ///             .clone() // Clone the Box<dyn PartitionBase>
     ///             .into_open_file(node) // Get an OwnedFileStream
     ///             .expect("Failed to open file stream");
     ///         // Open the inner disc image using the owned stream
-    ///         let inner_disc = DiscReader::new_stream(Box::new(file), &DiscOptions::default())
+    ///         let inner_disc = DiscReader::new_from_cloneable_read(file, &DiscOptions::default())
     ///             .expect("Failed to open inner disc");
     ///         // ...
     ///     }
     ///     Ok(())
     /// }
     /// ```
-    pub fn into_open_file(self: Box<Self>, node: Node) -> std::io::Result<OwnedFileReader> {
+    pub fn into_open_file(self: Box<Self>, node: Node) -> io::Result<OwnedFileReader> {
         if !node.is_file() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
                 "Node is not a file".to_string(),
             ));
         }

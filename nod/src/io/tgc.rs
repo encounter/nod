@@ -22,7 +22,7 @@ use crate::{
     read::{DiscMeta, DiscStream, PartitionOptions, PartitionReader},
     util::{
         Align, array_ref,
-        read::{read_arc, read_arc_slice, read_from, read_with_zero_fill},
+        read::{read_arc_at, read_arc_slice_at, read_at, read_with_zero_fill},
         static_assert,
     },
     write::{DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
@@ -73,21 +73,19 @@ pub struct BlockReaderTGC {
 
 impl BlockReaderTGC {
     pub fn new(mut inner: Box<dyn DiscStream>) -> Result<Box<dyn BlockReader>> {
-        inner.seek(SeekFrom::Start(0)).context("Seeking to start")?;
-
         // Read header
-        let header: TGCHeader = read_from(inner.as_mut()).context("Reading TGC header")?;
+        let header: TGCHeader = read_at(inner.as_mut(), 0).context("Reading TGC header")?;
         if header.magic != TGC_MAGIC {
             return Err(Error::DiscFormat("Invalid TGC magic".to_string()));
         }
         let disc_size = (header.gcm_files_start.get() + header.user_size.get()) as u64;
 
         // Read GCM header
-        inner
-            .seek(SeekFrom::Start(header.header_offset.get() as u64))
-            .context("Seeking to GCM header")?;
-        let raw_header =
-            read_arc::<[u8; GCM_HEADER_SIZE], _>(inner.as_mut()).context("Reading GCM header")?;
+        let raw_header = read_arc_at::<[u8; GCM_HEADER_SIZE], _>(
+            inner.as_mut(),
+            header.header_offset.get() as u64,
+        )
+        .context("Reading GCM header")?;
 
         let disc_header =
             DiscHeader::ref_from_bytes(array_ref![raw_header, 0, size_of::<DiscHeader>()])
@@ -99,14 +97,20 @@ impl BlockReaderTGC {
         let boot_header = boot_header.clone();
 
         // Read DOL
-        inner.seek(SeekFrom::Start(header.dol_offset.get() as u64)).context("Seeking to DOL")?;
-        let raw_dol = read_arc_slice::<u8, _>(inner.as_mut(), header.dol_size.get() as usize)
-            .context("Reading DOL")?;
+        let raw_dol = read_arc_slice_at::<u8, _>(
+            inner.as_mut(),
+            header.dol_size.get() as usize,
+            header.dol_offset.get() as u64,
+        )
+        .context("Reading DOL")?;
 
         // Read FST
-        inner.seek(SeekFrom::Start(header.fst_offset.get() as u64)).context("Seeking to FST")?;
-        let raw_fst = read_arc_slice::<u8, _>(inner.as_mut(), header.fst_size.get() as usize)
-            .context("Reading FST")?;
+        let raw_fst = read_arc_slice_at::<u8, _>(
+            inner.as_mut(),
+            header.fst_size.get() as usize,
+            header.fst_offset.get() as u64,
+        )
+        .context("Reading FST")?;
         let fst = Fst::new(&raw_fst)?;
 
         let mut write_info = Vec::with_capacity(5 + fst.num_files());
@@ -198,8 +202,7 @@ impl FileCallback for FileCallbackTGC {
         // Calculate file offset in TGC
         let file_start = (node.offset(false) as u32 - self.header.gcm_files_start.get())
             + self.header.user_offset.get();
-        self.inner.seek(SeekFrom::Start(file_start as u64 + offset))?;
-        self.inner.read_exact(out)?;
+        self.inner.read_exact_at(out, file_start as u64 + offset)?;
         Ok(())
     }
 }
