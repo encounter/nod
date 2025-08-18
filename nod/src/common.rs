@@ -264,7 +264,7 @@ impl fmt::Display for PartitionKind {
 impl PartitionKind {
     /// Returns the directory name for the partition kind.
     #[inline]
-    pub fn dir_name(&self) -> Cow<str> {
+    pub fn dir_name(&self) -> Cow<'_, str> {
         match self {
             Self::Data => Cow::Borrowed("DATA"),
             Self::Update => Cow::Borrowed("UPDATE"),
@@ -356,7 +356,7 @@ impl PartitionInfo {
 
     /// A view into the file system table (FST).
     #[inline]
-    pub fn fst(&self) -> Option<Fst> {
+    pub fn fst(&self) -> Option<Fst<'_>> {
         // FST has already been parsed, so we can safely unwrap
         Some(Fst::new(self.raw_fst.as_deref()?).unwrap())
     }

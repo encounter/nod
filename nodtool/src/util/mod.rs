@@ -8,7 +8,7 @@ use std::{
     path::{MAIN_SEPARATOR, Path},
 };
 
-pub fn path_display(path: &Path) -> PathDisplay { PathDisplay { path } }
+pub fn path_display(path: &Path) -> PathDisplay<'_> { PathDisplay { path } }
 
 pub struct PathDisplay<'a> {
     path: &'a Path,

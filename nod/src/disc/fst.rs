@@ -154,7 +154,7 @@ impl<'a> Fst<'a> {
 
     /// Iterate over the nodes in the FST.
     #[inline]
-    pub fn iter(&self) -> FstIter { FstIter { fst: self.clone(), idx: 1, segments: vec![] } }
+    pub fn iter(&self) -> FstIter<'_> { FstIter { fst: self.clone(), idx: 1, segments: vec![] } }
 
     /// Get the name of a node.
     pub fn get_name(&self, node: Node) -> Result<Cow<'a, str>, String> {

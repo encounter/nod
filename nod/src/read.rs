@@ -359,7 +359,7 @@ impl dyn PartitionReader + '_ {
     ///     Ok(())
     /// }
     /// ```
-    pub fn open_file(&mut self, node: Node) -> io::Result<FileReader> {
+    pub fn open_file(&mut self, node: Node) -> io::Result<FileReader<'_>> {
         if !node.is_file() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -475,7 +475,7 @@ impl PartitionMeta {
 
     /// A view into the file system table (FST).
     #[inline]
-    pub fn fst(&self) -> Result<Fst, &'static str> { Fst::new(&self.raw_fst) }
+    pub fn fst(&self) -> Result<Fst<'_>, &'static str> { Fst::new(&self.raw_fst) }
 
     /// A view into the DOL header.
     #[inline]

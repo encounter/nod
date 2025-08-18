@@ -1,4 +1,4 @@
-#![allow(missing_docs)] // TODO
+#![allow(missing_docs, unused)] // TODO
 use std::{
     io,
     io::{Read, Seek, Write},

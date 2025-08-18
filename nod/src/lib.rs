@@ -147,7 +147,8 @@
 //! // ...
 //! ```
 
-pub mod build;
+// [WIP] Disc image building is incomplete and not yet exposed.
+pub(crate) mod build;
 pub mod common;
 pub mod disc;
 pub(crate) mod io;

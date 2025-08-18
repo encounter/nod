@@ -231,7 +231,7 @@ impl DiscReader {
     /// A reference to the raw FST for GameCube discs.
     /// For Wii discs, use the FST from the appropriate [PartitionInfo].
     #[inline]
-    pub fn fst(&self) -> Option<Fst> {
+    pub fn fst(&self) -> Option<Fst<'_>> {
         match &self.disc_data {
             DiscReaderData::GameCube { raw_fst } => {
                 raw_fst.as_deref().and_then(|v| Fst::new(v).ok())
