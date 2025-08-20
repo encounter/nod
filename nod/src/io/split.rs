@@ -105,29 +105,37 @@ impl Clone for SplitFileReader {
 }
 
 impl DiscStream for SplitFileReader {
-    fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
-        let split = if self.open_file.as_ref().is_none_or(|s| !s.contains(offset)) {
-            let split = if let Some(split) = self.files.iter().find(|f| f.contains(offset)) {
-                let file = File::open(&split.inner)?;
-                Split { inner: file, begin: split.begin, size: split.size }
+    fn read_exact_at(&mut self, mut buf: &mut [u8], mut offset: u64) -> io::Result<()> {
+        while !buf.is_empty() {
+            let split = if self.open_file.as_ref().is_none_or(|s| !s.contains(offset)) {
+                let split = if let Some(split) = self.files.iter().find(|f| f.contains(offset)) {
+                    let file = File::open(&split.inner)?;
+                    Split { inner: file, begin: split.begin, size: split.size }
+                } else {
+                    return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+                };
+                self.open_file.insert(split)
             } else {
-                return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+                self.open_file.as_mut().unwrap()
             };
-            self.open_file.insert(split)
-        } else {
-            self.open_file.as_mut().unwrap()
-        };
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::FileExt;
-            split.inner.read_exact_at(buf, offset)
+            let file_offset = offset - split.begin;
+            let len = (split.size - file_offset).min(buf.len() as u64) as usize;
+            let (out, remain) = buf.split_at_mut(len);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::FileExt;
+                split.inner.read_exact_at(out, file_offset)?;
+            }
+            #[cfg(not(unix))]
+            {
+                use std::io::{Read, Seek, SeekFrom};
+                split.inner.seek(SeekFrom::Start(file_offset))?;
+                split.inner.read_exact(out)?
+            }
+            buf = remain;
+            offset += len as u64;
         }
-        #[cfg(not(unix))]
-        {
-            use std::io::{Read, Seek, SeekFrom};
-            split.inner.seek(SeekFrom::Start(offset - split.begin))?;
-            split.inner.read_exact(buf)
-        }
+        Ok(())
     }
 
     fn stream_len(&mut self) -> io::Result<u64> { Ok(self.len()) }
