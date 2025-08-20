@@ -92,7 +92,7 @@ impl NKitHeader {
         block_size: u32,
         has_junk_bits: bool,
     ) -> Option<Self> {
-        let magic: MagicBytes = read_at(reader, 0).ok()?;
+        let magic: MagicBytes = read_at(reader, pos).ok()?;
         if magic == *b"NKIT" {
             let mut reader = ReadAdapter::new(reader, pos);
             match NKitHeader::read_from(&mut reader, block_size, has_junk_bits) {
