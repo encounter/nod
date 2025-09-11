@@ -200,12 +200,18 @@ pub(crate) fn check_block(
     lfg: &mut LaggedFibonacci,
     disc_id: [u8; 4],
     disc_num: u8,
+    strip_partitions: [bool; 64]
 ) -> io::Result<CheckBlockResult> {
     let start_sector = (input_position / SECTOR_SIZE as u64) as u32;
     let end_sector = ((input_position + buf.len() as u64) / SECTOR_SIZE as u64) as u32;
     if let Some(partition) = partition_info.iter().find(|p| {
         p.has_hashes && start_sector >= p.data_start_sector && end_sector < p.data_end_sector
     }) {
+        // Strip partition data
+        if strip_partitions[partition.index] {
+            return Ok(CheckBlockResult::Zeroed);
+        }
+
         if input_position % SECTOR_SIZE as u64 != 0 {
             return Err(io::Error::other("Partition block not aligned to sector boundary"));
         }

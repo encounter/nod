@@ -165,6 +165,7 @@ struct BlockProcessorWBFS {
     lfg: LaggedFibonacci,
     disc_id: [u8; 4],
     disc_num: u8,
+    strip_partitions: [bool; 64]
 }
 
 impl Clone for BlockProcessorWBFS {
@@ -177,6 +178,7 @@ impl Clone for BlockProcessorWBFS {
             lfg: LaggedFibonacci::default(),
             disc_id: self.disc_id,
             disc_num: self.disc_num,
+            strip_partitions: self.strip_partitions,
         }
     }
 }
@@ -199,6 +201,7 @@ impl BlockProcessor for BlockProcessorWBFS {
             &mut self.lfg,
             self.disc_id,
             self.disc_num,
+            self.strip_partitions
         )? {
             CheckBlockResult::Normal => {
                 BlockResult { block_idx, disc_data, block_data, meta: CheckBlockResult::Normal }
@@ -226,15 +229,19 @@ pub struct DiscWriterWBFS {
     header: WBFSHeader,
     disc_table: Box<[u8]>,
     block_count: u16,
+    strip_partitions: [bool; 64],
 }
 
 pub const DEFAULT_BLOCK_SIZE: u32 = 0x200000; // 2 MiB
 
 impl DiscWriterWBFS {
     pub fn new(mut inner: DiscReader, options: &FormatOptions) -> Result<Box<dyn DiscWriter>> {
-        if options.format != Format::Wbfs {
-            return Err(Error::DiscFormat("Invalid format for WBFS writer".to_string()));
-        }
+        let strip_partitions = match options.format {
+            Format::Wbfs => [false; 64],
+            Format::StrippedWbfs(strip_partitions) => strip_partitions,
+            _ => return Err(Error::DiscFormat("Invalid format for WBFS writer".to_string())),
+        };
+
         if options.compression != Compression::None {
             return Err(Error::DiscFormat("WBFS does not support compression".to_string()));
         }
@@ -275,7 +282,7 @@ impl DiscWriterWBFS {
         }
 
         inner.rewind().context("Seeking to start")?;
-        Ok(Box::new(Self { inner, header, disc_table, block_count }))
+        Ok(Box::new(Self { inner, header, disc_table, block_count, strip_partitions }))
     }
 }
 
@@ -317,6 +324,7 @@ impl DiscWriter for DiscWriterWBFS {
                 lfg: LaggedFibonacci::default(),
                 disc_id,
                 disc_num,
+                strip_partitions: self.strip_partitions
             },
             self.block_count as u32,
             options.processor_threads,
