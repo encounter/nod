@@ -54,8 +54,7 @@ impl Format {
             #[cfg(feature = "compress-zlib")]
             Format::Gcz => crate::io::gcz::DEFAULT_BLOCK_SIZE,
             Format::Rvz => crate::io::wia::RVZ_DEFAULT_CHUNK_SIZE,
-            Format::Wbfs => crate::io::wbfs::DEFAULT_BLOCK_SIZE,
-            Format::StrippedWbfs(_) => crate::io::wbfs::DEFAULT_BLOCK_SIZE,
+            Format::Wbfs | Format::StrippedWbfs(_) => crate::io::wbfs::DEFAULT_BLOCK_SIZE,
             Format::Wia => crate::io::wia::WIA_DEFAULT_CHUNK_SIZE,
             _ => 0,
         }

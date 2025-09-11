@@ -106,8 +106,7 @@ impl DiscWriter {
             #[cfg(feature = "compress-zlib")]
             Format::Gcz => crate::io::gcz::DiscWriterGCZ::new(reader, &options)?,
             Format::Tgc => crate::io::tgc::DiscWriterTGC::new(reader, &options)?,
-            Format::Wbfs => crate::io::wbfs::DiscWriterWBFS::new(reader, &options)?,
-            Format::StrippedWbfs(_) => crate::io::wbfs::DiscWriterWBFS::new(reader, &options)?,
+            Format::Wbfs | Format::StrippedWbfs(_) => crate::io::wbfs::DiscWriterWBFS::new(reader, &options)?,
             Format::Wia | Format::Rvz => crate::io::wia::DiscWriterWIA::new(reader, &options)?,
             format => return Err(Error::Other(format!("Unsupported write format: {format}"))),
         };
