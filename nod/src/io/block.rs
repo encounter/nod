@@ -53,7 +53,7 @@ pub fn new(mut stream: Box<dyn DiscStream>) -> Result<Box<dyn BlockReader>> {
             Some(Format::Nfs) => {
                 return Err(Error::DiscFormat("NFS requires a filesystem path".to_string()));
             }
-            Some(Format::Wbfs | Format::StrippedWbfs(_)) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
+            Some(Format::Wbfs) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
             Some(Format::Wia | Format::Rvz) => crate::io::wia::BlockReaderWIA::new(stream)?,
             Some(Format::Tgc) => crate::io::tgc::BlockReaderTGC::new(stream)?,
             None => return Err(Error::DiscFormat("Unknown disc format".to_string())),
@@ -99,7 +99,7 @@ pub fn open(filename: &Path) -> Result<Box<dyn BlockReader>> {
             }
         },
         Some(Format::Tgc) => crate::io::tgc::BlockReaderTGC::new(stream)?,
-        Some(Format::Wbfs | Format::StrippedWbfs(_)) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
+        Some(Format::Wbfs) => crate::io::wbfs::BlockReaderWBFS::new(stream)?,
         Some(Format::Wia | Format::Rvz) => crate::io::wia::BlockReaderWIA::new(stream)?,
         None => return Err(Error::DiscFormat("Unknown disc format".to_string())),
     };

@@ -192,6 +192,7 @@ fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
             digest_md5: false,
             digest_sha1: true,
             digest_xxh64: false,
+            scrub_update_partition: false
         },
     )?;
     pb.finish();

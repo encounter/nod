@@ -178,7 +178,7 @@ impl BlockProcessor for BlockProcessorCISO {
             &mut self.lfg,
             self.disc_id,
             self.disc_num,
-            [false; 64]
+            false
         )? {
             CheckBlockResult::Normal => {
                 BlockResult { block_idx, disc_data, block_data, meta: CheckBlockResult::Normal }

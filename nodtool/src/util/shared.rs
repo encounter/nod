@@ -123,6 +123,7 @@ pub fn convert_and_verify(
             digest_md5: md5,
             digest_sha1: true,
             digest_xxh64: true,
+            scrub_update_partition: false
         },
     )?;
     pb.finish();

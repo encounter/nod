@@ -18,6 +18,7 @@ use crate::{
     util::{aes::decrypt_sector_b2b, array_ref, array_ref_mut, lfg::LaggedFibonacci},
     write::{DataCallback, DiscFinalization, DiscWriterWeight, ProcessOptions},
 };
+use crate::common::PartitionKind;
 
 /// A trait for writing disc images.
 pub trait DiscWriter: DynClone {
@@ -200,15 +201,15 @@ pub(crate) fn check_block(
     lfg: &mut LaggedFibonacci,
     disc_id: [u8; 4],
     disc_num: u8,
-    strip_partitions: [bool; 64]
+    scrub_update_partition: bool,
 ) -> io::Result<CheckBlockResult> {
     let start_sector = (input_position / SECTOR_SIZE as u64) as u32;
     let end_sector = ((input_position + buf.len() as u64) / SECTOR_SIZE as u64) as u32;
     if let Some(partition) = partition_info.iter().find(|p| {
         p.has_hashes && start_sector >= p.data_start_sector && end_sector < p.data_end_sector
     }) {
-        // Strip partition data
-        if strip_partitions[partition.index] {
+        // Ignore update partition data
+        if scrub_update_partition && partition.kind == PartitionKind::Update {
             return Ok(CheckBlockResult::Zeroed);
         }
 

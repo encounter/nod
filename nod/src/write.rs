@@ -70,6 +70,10 @@ pub struct ProcessOptions {
     /// Each digest calculation will run on a separate thread, unaffected by the processor thread
     /// count.
     pub digest_xxh64: bool,
+    /// Strip out the update partition to save space.
+    ///
+    /// This is implemented only for WBFS for now.
+    pub scrub_update_partition: bool
 }
 
 /// A callback for writing disc data.
@@ -106,7 +110,7 @@ impl DiscWriter {
             #[cfg(feature = "compress-zlib")]
             Format::Gcz => crate::io::gcz::DiscWriterGCZ::new(reader, &options)?,
             Format::Tgc => crate::io::tgc::DiscWriterTGC::new(reader, &options)?,
-            Format::Wbfs | Format::StrippedWbfs(_) => crate::io::wbfs::DiscWriterWBFS::new(reader, &options)?,
+            Format::Wbfs => crate::io::wbfs::DiscWriterWBFS::new(reader, &options)?,
             Format::Wia | Format::Rvz => crate::io::wia::DiscWriterWIA::new(reader, &options)?,
             format => return Err(Error::Other(format!("Unsupported write format: {format}"))),
         };

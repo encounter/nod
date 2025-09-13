@@ -38,8 +38,6 @@ pub enum Format {
     Rvz,
     /// WBFS
     Wbfs,
-    /// Partition stripped WBFS
-    StrippedWbfs([bool; 64]),
     /// WIA
     Wia,
     /// TGC
@@ -54,7 +52,7 @@ impl Format {
             #[cfg(feature = "compress-zlib")]
             Format::Gcz => crate::io::gcz::DEFAULT_BLOCK_SIZE,
             Format::Rvz => crate::io::wia::RVZ_DEFAULT_CHUNK_SIZE,
-            Format::Wbfs | Format::StrippedWbfs(_) => crate::io::wbfs::DEFAULT_BLOCK_SIZE,
+            Format::Wbfs => crate::io::wbfs::DEFAULT_BLOCK_SIZE,
             Format::Wia => crate::io::wia::WIA_DEFAULT_CHUNK_SIZE,
             _ => 0,
         }
@@ -82,7 +80,6 @@ impl fmt::Display for Format {
             Format::Nfs => write!(f, "NFS"),
             Format::Rvz => write!(f, "RVZ"),
             Format::Wbfs => write!(f, "WBFS"),
-            Format::StrippedWbfs(_) => write!(f, "Stripped WBFS"),
             Format::Wia => write!(f, "WIA"),
             Format::Tgc => write!(f, "TGC"),
         }
