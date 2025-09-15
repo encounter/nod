@@ -123,7 +123,9 @@ impl BlockReader for BlockReaderCISO {
         Ok(Block::new(block_idx, block_size, BlockKind::Raw))
     }
 
-    fn block_size(&self) -> u32 { self.header.block_size.get() }
+    fn block_size(&self) -> u32 {
+        self.header.block_size.get()
+    }
 
     fn meta(&self) -> DiscMeta {
         let mut result = DiscMeta {
@@ -145,6 +147,7 @@ struct BlockProcessorCISO {
     lfg: LaggedFibonacci,
     disc_id: [u8; 4],
     disc_num: u8,
+    scrub_update_partition: bool,
 }
 
 impl Clone for BlockProcessorCISO {
@@ -156,6 +159,7 @@ impl Clone for BlockProcessorCISO {
             lfg: LaggedFibonacci::default(),
             disc_id: self.disc_id,
             disc_num: self.disc_num,
+            scrub_update_partition: self.scrub_update_partition,
         }
     }
 }
@@ -178,7 +182,7 @@ impl BlockProcessor for BlockProcessorCISO {
             &mut self.lfg,
             self.disc_id,
             self.disc_num,
-            false
+            self.scrub_update_partition,
         )? {
             CheckBlockResult::Normal => {
                 BlockResult { block_idx, disc_data, block_data, meta: CheckBlockResult::Normal }
@@ -265,6 +269,7 @@ impl DiscWriter for DiscWriterCISO {
                 lfg: LaggedFibonacci::default(),
                 disc_id,
                 disc_num,
+                scrub_update_partition: options.scrub_update_partition,
             },
             self.block_count,
             options.processor_threads,
@@ -318,7 +323,11 @@ impl DiscWriter for DiscWriterCISO {
         Ok(finalization)
     }
 
-    fn progress_bound(&self) -> u64 { self.disc_size }
+    fn progress_bound(&self) -> u64 {
+        self.disc_size
+    }
 
-    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Medium }
+    fn weight(&self) -> DiscWriterWeight {
+        DiscWriterWeight::Medium
+    }
 }
