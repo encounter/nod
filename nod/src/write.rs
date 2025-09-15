@@ -72,8 +72,8 @@ pub struct ProcessOptions {
     pub digest_xxh64: bool,
     /// Strip out the update partition to save space.
     ///
-    /// This is implemented only for WBFS for now.
-    pub scrub_update_partition: bool
+    /// This is implemented only for WBFS and CISO for now.
+    pub scrub_update_partition: bool,
 }
 
 /// A callback for writing disc data.
@@ -134,13 +134,17 @@ impl DiscWriter {
     /// Returns the progress upper bound for the disc writer. For most formats, this has no
     /// relation to the written disc size, but can be used to display progress.
     #[inline]
-    pub fn progress_bound(&self) -> u64 { self.0.progress_bound() }
+    pub fn progress_bound(&self) -> u64 {
+        self.0.progress_bound()
+    }
 
     /// Returns the weight of the disc writer, which can help determine the number of threads to
     /// dedicate for output processing. This may depend on the format's configuration, such as
     /// whether compression is enabled.
     #[inline]
-    pub fn weight(&self) -> DiscWriterWeight { self.0.weight() }
+    pub fn weight(&self) -> DiscWriterWeight {
+        self.0.weight()
+    }
 }
 
 /// Data returned by the disc writer after processing.
