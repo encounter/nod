@@ -7,6 +7,7 @@ use std::{
 use bytes::{Bytes, BytesMut};
 use dyn_clone::DynClone;
 
+use crate::common::PartitionKind;
 use crate::{
     Error, Result, ResultContext,
     common::PartitionInfo,
@@ -18,7 +19,6 @@ use crate::{
     util::{aes::decrypt_sector_b2b, array_ref, array_ref_mut, lfg::LaggedFibonacci},
     write::{DataCallback, DiscFinalization, DiscWriterWeight, ProcessOptions},
 };
-use crate::common::PartitionKind;
 
 /// A trait for writing disc images.
 pub trait DiscWriter: DynClone {
@@ -193,6 +193,7 @@ pub enum CheckBlockResult {
 }
 
 /// Check if a block is zeroed or junk data.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_block(
     buf: &[u8],
     decrypted_block: &mut [u8],
