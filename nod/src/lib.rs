@@ -121,6 +121,7 @@
 //!     digest_md5: false, // MD5 is slow, skip it
 //!     digest_sha1: true,
 //!     digest_xxh64: true,
+//!     scrub_update_partition: false,
 //! };
 //! // Start processing the disc image.
 //! let finalization = writer
