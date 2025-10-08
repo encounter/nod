@@ -52,3 +52,4 @@ xxhash-rust = { version = "0.8", features = ["xxh64"] }
 zerocopy = { workspace = true }
 zstd = { version = "0.13", optional = true, default-features = false }
 zstd-safe = { version = "7.2", optional = true, default-features = false }
+block-padding = "=0.4.0-rc.4"
