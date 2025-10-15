@@ -31,7 +31,9 @@ use crate::{
         read::{box_to_bytes, read_arc_at},
         static_assert,
     },
-    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{
+        DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions, ScrubLevel,
+    },
 };
 
 pub const CISO_MAP_SIZE: usize = SECTOR_SIZE - 8;
@@ -123,9 +125,7 @@ impl BlockReader for BlockReaderCISO {
         Ok(Block::new(block_idx, block_size, BlockKind::Raw))
     }
 
-    fn block_size(&self) -> u32 {
-        self.header.block_size.get()
-    }
+    fn block_size(&self) -> u32 { self.header.block_size.get() }
 
     fn meta(&self) -> DiscMeta {
         let mut result = DiscMeta {
@@ -269,7 +269,7 @@ impl DiscWriter for DiscWriterCISO {
                 lfg: LaggedFibonacci::default(),
                 disc_id,
                 disc_num,
-                scrub_update_partition: options.scrub_update_partition,
+                scrub_update_partition: options.scrub == ScrubLevel::UpdatePartition,
             },
             self.block_count,
             options.processor_threads,
@@ -323,11 +323,7 @@ impl DiscWriter for DiscWriterCISO {
         Ok(finalization)
     }
 
-    fn progress_bound(&self) -> u64 {
-        self.disc_size
-    }
+    fn progress_bound(&self) -> u64 { self.disc_size }
 
-    fn weight(&self) -> DiscWriterWeight {
-        DiscWriterWeight::Medium
-    }
+    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Medium }
 }

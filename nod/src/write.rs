@@ -70,10 +70,25 @@ pub struct ProcessOptions {
     /// Each digest calculation will run on a separate thread, unaffected by the processor thread
     /// count.
     pub digest_xxh64: bool,
-    /// Strip out the update partition to save space.
+    /// The level of scrubbing to perform on the disc image.
     ///
-    /// This is implemented only for WBFS and CISO for now.
-    pub scrub_update_partition: bool,
+    /// This may reduce the size of the output disc image by removing unnecessary data, but will
+    /// also prevent reconstruction of the original disc image. Use with caution.
+    ///
+    /// If unsure, use `ScrubLevel::None`.
+    pub scrub: ScrubLevel,
+}
+
+/// The level of scrubbing to perform on the disc image.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrubLevel {
+    /// Do not scrub any data from the disc image.
+    #[default]
+    None,
+    /// Replace the update partition with zeroes to save space.
+    ///
+    /// NOTE: This is currently implemented only for WBFS and CISO.
+    UpdatePartition,
 }
 
 /// A callback for writing disc data.
@@ -134,17 +149,13 @@ impl DiscWriter {
     /// Returns the progress upper bound for the disc writer. For most formats, this has no
     /// relation to the written disc size, but can be used to display progress.
     #[inline]
-    pub fn progress_bound(&self) -> u64 {
-        self.0.progress_bound()
-    }
+    pub fn progress_bound(&self) -> u64 { self.0.progress_bound() }
 
     /// Returns the weight of the disc writer, which can help determine the number of threads to
     /// dedicate for output processing. This may depend on the format's configuration, such as
     /// whether compression is enabled.
     #[inline]
-    pub fn weight(&self) -> DiscWriterWeight {
-        self.0.weight()
-    }
+    pub fn weight(&self) -> DiscWriterWeight { self.0.weight() }
 }
 
 /// Data returned by the disc writer after processing.

@@ -7,10 +7,9 @@ use std::{
 use bytes::{Bytes, BytesMut};
 use dyn_clone::DynClone;
 
-use crate::common::PartitionKind;
 use crate::{
     Error, Result, ResultContext,
-    common::PartitionInfo,
+    common::{PartitionInfo, PartitionKind},
     disc::{
         SECTOR_SIZE,
         reader::DiscReader,
