@@ -182,9 +182,7 @@ impl BlockReader for BlockReaderGCZ {
         Ok(Block::new(block_idx, block_size, BlockKind::Raw))
     }
 
-    fn block_size(&self) -> u32 {
-        self.header.block_size.get()
-    }
+    fn block_size(&self) -> u32 { self.header.block_size.get() }
 
     fn meta(&self) -> DiscMeta {
         DiscMeta {
@@ -360,11 +358,7 @@ impl DiscWriter for DiscWriterGCZ {
         Ok(finalization)
     }
 
-    fn progress_bound(&self) -> u64 {
-        self.header.disc_size.get()
-    }
+    fn progress_bound(&self) -> u64 { self.header.disc_size.get() }
 
-    fn weight(&self) -> DiscWriterWeight {
-        DiscWriterWeight::Heavy
-    }
+    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Heavy }
 }

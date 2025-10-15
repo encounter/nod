@@ -91,8 +91,7 @@ pub trait DiscStream: DynClone + Send {
 dyn_clone::clone_trait_object!(DiscStream);
 
 impl<T> DiscStream for T
-where
-    T: AsRef<[u8]> + Send + Clone,
+where T: AsRef<[u8]> + Send + Clone
 {
     fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
         let data = self.as_ref();
@@ -105,60 +104,44 @@ where
         Ok(())
     }
 
-    fn stream_len(&mut self) -> io::Result<u64> {
-        Ok(self.as_ref().len() as u64)
-    }
+    fn stream_len(&mut self) -> io::Result<u64> { Ok(self.as_ref().len() as u64) }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct CloneableStream<T>(pub T)
-where
-    T: Read + Seek + Clone + Send;
+where T: Read + Seek + Clone + Send;
 
 impl<T> CloneableStream<T>
-where
-    T: Read + Seek + Clone + Send,
+where T: Read + Seek + Clone + Send
 {
-    pub fn new(stream: T) -> Self {
-        Self(stream)
-    }
+    pub fn new(stream: T) -> Self { Self(stream) }
 }
 
 impl<T> DiscStream for CloneableStream<T>
-where
-    T: Read + Seek + Clone + Send,
+where T: Read + Seek + Clone + Send
 {
     fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
         self.0.seek(io::SeekFrom::Start(offset))?;
         self.0.read_exact(buf)
     }
 
-    fn stream_len(&mut self) -> io::Result<u64> {
-        self.0.seek(io::SeekFrom::End(0))
-    }
+    fn stream_len(&mut self) -> io::Result<u64> { self.0.seek(io::SeekFrom::End(0)) }
 }
 
 #[derive(Debug)]
 pub(crate) struct NonCloneableStream<T>(pub Arc<Mutex<T>>)
-where
-    T: Read + Seek + Send;
+where T: Read + Seek + Send;
 
 impl<T> Clone for NonCloneableStream<T>
-where
-    T: Read + Seek + Send,
+where T: Read + Seek + Send
 {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
+    fn clone(&self) -> Self { Self(self.0.clone()) }
 }
 
 impl<T> NonCloneableStream<T>
-where
-    T: Read + Seek + Send,
+where T: Read + Seek + Send
 {
-    pub fn new(stream: T) -> Self {
-        Self(Arc::new(Mutex::new(stream)))
-    }
+    pub fn new(stream: T) -> Self { Self(Arc::new(Mutex::new(stream))) }
 
     fn lock(&self) -> io::Result<std::sync::MutexGuard<'_, T>> {
         self.0.lock().map_err(|_| io::Error::other("NonCloneableStream mutex poisoned"))
@@ -166,8 +149,7 @@ where
 }
 
 impl<T> DiscStream for NonCloneableStream<T>
-where
-    T: Read + Seek + Send,
+where T: Read + Seek + Send
 {
     fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> io::Result<()> {
         let mut stream = self.lock()?;
@@ -212,9 +194,7 @@ impl DiscReader {
     /// access (e.g. for preloading blocks during reading or parallel block processing during
     /// conversion).
     pub fn new_from_cloneable_read<R>(stream: R, options: &DiscOptions) -> Result<DiscReader>
-    where
-        R: Read + Seek + Clone + Send + 'static,
-    {
+    where R: Read + Seek + Clone + Send + 'static {
         Self::new_stream(Box::new(CloneableStream::new(stream)), options)
     }
 
@@ -223,54 +203,40 @@ impl DiscReader {
     /// Multithreaded accesses will be synchronized, which will limit performance (e.g. for
     /// preloading blocks during reading or parallel block processing during conversion).
     pub fn new_from_non_cloneable_read<R>(stream: R, options: &DiscOptions) -> Result<DiscReader>
-    where
-        R: Read + Seek + Send + 'static,
-    {
+    where R: Read + Seek + Send + 'static {
         Self::new_stream(Box::new(NonCloneableStream::new(stream)), options)
     }
 
     /// Detects the format of a disc image from a read stream.
     #[inline]
     pub fn detect<R>(stream: &mut R) -> io::Result<Option<Format>>
-    where
-        R: Read + ?Sized,
-    {
+    where R: Read + ?Sized {
         block::detect(stream)
     }
 
     /// The disc's primary header.
     #[inline]
-    pub fn header(&self) -> &DiscHeader {
-        self.0.header()
-    }
+    pub fn header(&self) -> &DiscHeader { self.0.header() }
 
     /// The Wii disc's region information.
     ///
     /// **GameCube**: This will return `None`.
     #[inline]
-    pub fn region(&self) -> Option<&[u8; REGION_SIZE]> {
-        self.0.region()
-    }
+    pub fn region(&self) -> Option<&[u8; REGION_SIZE]> { self.0.region() }
 
     /// Returns extra metadata included in the disc file format, if any.
     #[inline]
-    pub fn meta(&self) -> DiscMeta {
-        self.0.meta()
-    }
+    pub fn meta(&self) -> DiscMeta { self.0.meta() }
 
     /// The disc's size in bytes, or an estimate if not stored by the format.
     #[inline]
-    pub fn disc_size(&self) -> u64 {
-        self.0.disc_size()
-    }
+    pub fn disc_size(&self) -> u64 { self.0.disc_size() }
 
     /// A list of Wii partitions on the disc.
     ///
     /// **GameCube**: This will return an empty slice.
     #[inline]
-    pub fn partitions(&self) -> &[PartitionInfo] {
-        self.0.partitions()
-    }
+    pub fn partitions(&self) -> &[PartitionInfo] { self.0.partitions() }
 
     /// Opens a decrypted partition read stream for the specified partition index.
     ///
@@ -297,35 +263,25 @@ impl DiscReader {
         self.0.open_partition_kind(kind, options)
     }
 
-    pub(crate) fn into_inner(self) -> disc::reader::DiscReader {
-        self.0
-    }
+    pub(crate) fn into_inner(self) -> disc::reader::DiscReader { self.0 }
 }
 
 impl BufRead for DiscReader {
     #[inline]
-    fn fill_buf(&mut self) -> io::Result<&[u8]> {
-        self.0.fill_buf()
-    }
+    fn fill_buf(&mut self) -> io::Result<&[u8]> { self.0.fill_buf() }
 
     #[inline]
-    fn consume(&mut self, amt: usize) {
-        self.0.consume(amt)
-    }
+    fn consume(&mut self, amt: usize) { self.0.consume(amt) }
 }
 
 impl Read for DiscReader {
     #[inline]
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.0.read(buf)
-    }
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.0.read(buf) }
 }
 
 impl Seek for DiscReader {
     #[inline]
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        self.0.seek(pos)
-    }
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> { self.0.seek(pos) }
 }
 
 /// Extra metadata about the underlying disc file format.
@@ -519,9 +475,7 @@ impl PartitionMeta {
 
     /// A view into the file system table (FST).
     #[inline]
-    pub fn fst(&self) -> Result<Fst<'_>, &'static str> {
-        Fst::new(&self.raw_fst)
-    }
+    pub fn fst(&self) -> Result<Fst<'_>, &'static str> { Fst::new(&self.raw_fst) }
 
     /// A view into the DOL header.
     #[inline]

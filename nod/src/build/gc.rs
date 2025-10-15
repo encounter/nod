@@ -129,9 +129,7 @@ impl GCPartitionBuilder {
 
     /// A junk file exists in the FST, but is excluded from the disc layout, so junk data will be
     /// written in its place.
-    pub fn add_junk_file(&mut self, name: String) {
-        self.junk_files.push(name);
-    }
+    pub fn add_junk_file(&mut self, name: String) { self.junk_files.push(name); }
 
     pub fn build(
         &self,
@@ -632,9 +630,7 @@ impl GCPartitionWriter {
     }
 
     pub fn into_cloneable_stream<Cb>(self, file_callback: Cb) -> Result<Box<dyn DiscStream>>
-    where
-        Cb: FileCallback + Clone + 'static,
-    {
+    where Cb: FileCallback + Clone + 'static {
         Ok(Box::new(CloneableStream::new(GCPartitionStream::new(
             file_callback,
             Arc::from(self.write_info),
@@ -645,9 +641,7 @@ impl GCPartitionWriter {
     }
 
     pub fn into_non_cloneable_stream<Cb>(self, file_callback: Cb) -> Result<Box<dyn DiscStream>>
-    where
-        Cb: FileCallback + 'static,
-    {
+    where Cb: FileCallback + 'static {
         Ok(Box::new(NonCloneableStream::new(GCPartitionStream::new(
             file_callback,
             Arc::from(self.write_info),
@@ -664,8 +658,7 @@ struct WriteCursor<W> {
 }
 
 impl<W> WriteCursor<W>
-where
-    W: Write,
+where W: Write
 {
     fn write_zeroes_until(&mut self, until: u64) -> io::Result<()> {
         static ZEROES: [u8; 0x1000] = [0u8; 0x1000];
@@ -680,8 +673,7 @@ where
 }
 
 impl<W> Write for WriteCursor<W>
-where
-    W: Write,
+where W: Write
 {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -691,9 +683,7 @@ where
     }
 
     #[inline]
-    fn flush(&mut self) -> io::Result<()> {
-        self.inner.flush()
-    }
+    fn flush(&mut self) -> io::Result<()> { self.inner.flush() }
 }
 
 #[derive(Clone)]
@@ -718,19 +708,14 @@ impl<Cb> GCPartitionStream<Cb> {
     }
 
     #[inline]
-    pub fn set_position(&mut self, pos: u64) {
-        self.pos = pos;
-    }
+    pub fn set_position(&mut self, pos: u64) { self.pos = pos; }
 
     #[inline]
-    pub fn len(&self) -> u64 {
-        self.size
-    }
+    pub fn len(&self) -> u64 { self.size }
 }
 
 impl<Cb> Read for GCPartitionStream<Cb>
-where
-    Cb: FileCallback,
+where Cb: FileCallback
 {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
         if self.pos >= self.size {
@@ -799,9 +784,7 @@ impl<Cb> Seek for GCPartitionStream<Cb> {
 }
 
 #[inline(always)]
-fn gcm_align(n: u64) -> u64 {
-    (n + 31) & !3
-}
+fn gcm_align(n: u64) -> u64 { (n + 31) & !3 }
 
 fn sort_files(files: &mut [WriteInfo]) -> Result<()> {
     files.sort_unstable_by_key(|info| (info.offset, info.size));

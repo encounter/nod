@@ -173,16 +173,12 @@ pub enum Error {
 
 impl From<&str> for Error {
     #[inline]
-    fn from(s: &str) -> Error {
-        Error::Other(s.to_string())
-    }
+    fn from(s: &str) -> Error { Error::Other(s.to_string()) }
 }
 
 impl From<String> for Error {
     #[inline]
-    fn from(s: String) -> Error {
-        Error::Other(s)
-    }
+    fn from(s: String) -> Error { Error::Other(s) }
 }
 
 impl From<zerocopy::AllocError> for Error {
@@ -206,9 +202,7 @@ pub trait ErrorContext {
 
 impl ErrorContext for std::io::Error {
     #[inline]
-    fn context(self, context: impl Into<String>) -> Error {
-        Error::Io(context.into(), self)
-    }
+    fn context(self, context: impl Into<String>) -> Error { Error::Io(context.into(), self) }
 }
 
 /// Helper trait for adding context to result errors.
@@ -218,13 +212,11 @@ pub trait ResultContext<T> {
 
     /// Adds context to a result error using a closure.
     fn with_context<F>(self, f: F) -> Result<T>
-    where
-        F: FnOnce() -> String;
+    where F: FnOnce() -> String;
 }
 
 impl<T, E> ResultContext<T> for Result<T, E>
-where
-    E: ErrorContext,
+where E: ErrorContext
 {
     #[inline]
     fn context(self, context: impl Into<String>) -> Result<T> {
@@ -233,9 +225,7 @@ where
 
     #[inline]
     fn with_context<F>(self, f: F) -> Result<T>
-    where
-        F: FnOnce() -> String,
-    {
+    where F: FnOnce() -> String {
         self.map_err(|e| e.context(f()))
     }
 }
@@ -255,8 +245,7 @@ pub(crate) trait IoResultContext<T> {
     fn io_context(self, context: impl Into<String>) -> std::io::Result<T>;
 
     fn io_with_context<F>(self, f: F) -> std::io::Result<T>
-    where
-        F: FnOnce() -> String;
+    where F: FnOnce() -> String;
 }
 
 impl<T> IoResultContext<T> for std::io::Result<T> {
@@ -267,9 +256,7 @@ impl<T> IoResultContext<T> for std::io::Result<T> {
 
     #[inline]
     fn io_with_context<F>(self, f: F) -> std::io::Result<T>
-    where
-        F: FnOnce() -> String,
-    {
+    where F: FnOnce() -> String {
         self.map_err(|e| e.io_context(f()))
     }
 }

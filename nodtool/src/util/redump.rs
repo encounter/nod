@@ -28,9 +28,7 @@ pub struct EntryIter<'a> {
 }
 
 impl EntryIter<'static> {
-    pub fn new() -> EntryIter<'static> {
-        Self { data: loaded_data(), index: 0 }
-    }
+    pub fn new() -> EntryIter<'static> { Self { data: loaded_data(), index: 0 } }
 }
 
 impl<'a> Iterator for EntryIter<'a> {

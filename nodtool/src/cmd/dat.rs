@@ -85,26 +85,20 @@ fn check(args: CheckArgs) -> Result<()> {
                             };
                             rename_map.insert(path.clone(), path.with_file_name(file_name));
                         }
-                        disc_results.insert(
-                            hashes.crc32,
-                            DiscResult {
-                                name,
-                                // hashes,
-                                redump_entry: Some(entry.clone()),
-                                matched: full_match,
-                            },
-                        );
+                        disc_results.insert(hashes.crc32, DiscResult {
+                            name,
+                            // hashes,
+                            redump_entry: Some(entry.clone()),
+                            matched: full_match,
+                        });
                     } else {
                         println!("{}: ❌ Not found", name);
-                        disc_results.insert(
-                            hashes.crc32,
-                            DiscResult {
-                                name,
-                                // hashes,
-                                redump_entry: None,
-                                matched: false,
-                            },
-                        );
+                        disc_results.insert(hashes.crc32, DiscResult {
+                            name,
+                            // hashes,
+                            redump_entry: None,
+                            matched: false,
+                        });
                     }
                 }
                 Err(e) => println!("{}: ❌ Error: {}", name, e),
@@ -198,7 +192,7 @@ fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
             digest_md5: false,
             digest_sha1: true,
             digest_xxh64: false,
-            scrub_update_partition: false,
+            scrub_update_partition: false
         },
     )?;
     pb.finish();

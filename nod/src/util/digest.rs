@@ -31,16 +31,12 @@ pub fn sha1_hash(buf: &[u8]) -> HashBytes {
 /// Hashes a byte slice with XXH64.
 #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
 #[instrument(skip_all)]
-pub fn xxh64_hash(buf: &[u8]) -> u64 {
-    xxhash_rust::xxh64::xxh64(buf, 0)
-}
+pub fn xxh64_hash(buf: &[u8]) -> u64 { xxhash_rust::xxh64::xxh64(buf, 0) }
 
 pub type DigestThread = (Sender<Bytes>, JoinHandle<DigestResult>);
 
 pub fn digest_thread<H>() -> DigestThread
-where
-    H: Hasher + Send + 'static,
-{
+where H: Hasher + Send + 'static {
     let (tx, rx) = crossbeam_channel::bounded::<Bytes>(1);
     let handle = thread::Builder::new()
         .name(format!("Digest {}", H::NAME))
@@ -135,63 +131,43 @@ pub trait Hasher {
 impl Hasher for md5::Md5 {
     const NAME: &'static str = "MD5";
 
-    fn new() -> Self {
-        Digest::new()
-    }
+    fn new() -> Self { Digest::new() }
 
-    fn finalize(self) -> DigestResult {
-        DigestResult::Md5(Digest::finalize(self).into())
-    }
+    fn finalize(self) -> DigestResult { DigestResult::Md5(Digest::finalize(self).into()) }
 
     #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
     #[instrument(name = "md5::Md5::update", skip_all)]
-    fn update(&mut self, data: &[u8]) {
-        Digest::update(self, data)
-    }
+    fn update(&mut self, data: &[u8]) { Digest::update(self, data) }
 }
 
 impl Hasher for sha1::Sha1 {
     const NAME: &'static str = "SHA-1";
 
-    fn new() -> Self {
-        Digest::new()
-    }
+    fn new() -> Self { Digest::new() }
 
-    fn finalize(self) -> DigestResult {
-        DigestResult::Sha1(Digest::finalize(self).into())
-    }
+    fn finalize(self) -> DigestResult { DigestResult::Sha1(Digest::finalize(self).into()) }
 
     #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
     #[instrument(name = "sha1::Sha1::update", skip_all)]
-    fn update(&mut self, data: &[u8]) {
-        Digest::update(self, data)
-    }
+    fn update(&mut self, data: &[u8]) { Digest::update(self, data) }
 }
 
 impl Hasher for crc32fast::Hasher {
     const NAME: &'static str = "CRC32";
 
-    fn new() -> Self {
-        crc32fast::Hasher::new()
-    }
+    fn new() -> Self { crc32fast::Hasher::new() }
 
-    fn finalize(self) -> DigestResult {
-        DigestResult::Crc32(crc32fast::Hasher::finalize(self))
-    }
+    fn finalize(self) -> DigestResult { DigestResult::Crc32(crc32fast::Hasher::finalize(self)) }
 
     #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
     #[instrument(name = "crc32fast::Hasher::update", skip_all)]
-    fn update(&mut self, data: &[u8]) {
-        crc32fast::Hasher::update(self, data)
-    }
+    fn update(&mut self, data: &[u8]) { crc32fast::Hasher::update(self, data) }
 }
 
 impl Hasher for xxhash_rust::xxh64::Xxh64 {
     const NAME: &'static str = "XXH64";
 
-    fn new() -> Self {
-        xxhash_rust::xxh64::Xxh64::new(0)
-    }
+    fn new() -> Self { xxhash_rust::xxh64::Xxh64::new(0) }
 
     fn finalize(self) -> DigestResult {
         DigestResult::Xxh64(xxhash_rust::xxh64::Xxh64::digest(&self))
@@ -199,9 +175,7 @@ impl Hasher for xxhash_rust::xxh64::Xxh64 {
 
     #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
     #[instrument(name = "xxhash_rust::xxh64::Xxh64::update", skip_all)]
-    fn update(&mut self, data: &[u8]) {
-        xxhash_rust::xxh64::Xxh64::update(self, data)
-    }
+    fn update(&mut self, data: &[u8]) { xxhash_rust::xxh64::Xxh64::update(self, data) }
 }
 
 #[cfg(feature = "openssl")]
@@ -214,16 +188,14 @@ mod openssl_util {
     pub type HasherSHA1 = HashWrapper<MessageDigestSHA1>;
 
     pub struct HashWrapper<T>
-    where
-        T: MessageDigest,
+    where T: MessageDigest
     {
         hasher: openssl::hash::Hasher,
         _marker: std::marker::PhantomData<T>,
     }
 
     impl<T> HashWrapper<T>
-    where
-        T: MessageDigest,
+    where T: MessageDigest
     {
         fn new() -> Self {
             Self {
@@ -240,25 +212,19 @@ mod openssl_util {
     pub struct MessageDigestMD5;
 
     impl MessageDigest for MessageDigestMD5 {
-        fn new() -> openssl::hash::MessageDigest {
-            openssl::hash::MessageDigest::md5()
-        }
+        fn new() -> openssl::hash::MessageDigest { openssl::hash::MessageDigest::md5() }
     }
 
     pub struct MessageDigestSHA1;
 
     impl MessageDigest for MessageDigestSHA1 {
-        fn new() -> openssl::hash::MessageDigest {
-            openssl::hash::MessageDigest::sha1()
-        }
+        fn new() -> openssl::hash::MessageDigest { openssl::hash::MessageDigest::sha1() }
     }
 
     impl Hasher for HasherMD5 {
         const NAME: &'static str = "MD5";
 
-        fn new() -> Self {
-            Self::new()
-        }
+        fn new() -> Self { Self::new() }
 
         fn finalize(mut self) -> DigestResult {
             DigestResult::Md5((*self.hasher.finish().unwrap()).try_into().unwrap())
@@ -266,17 +232,13 @@ mod openssl_util {
 
         #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
         #[instrument(name = "openssl_util::HasherMD5::update", skip_all)]
-        fn update(&mut self, data: &[u8]) {
-            self.hasher.update(data).unwrap()
-        }
+        fn update(&mut self, data: &[u8]) { self.hasher.update(data).unwrap() }
     }
 
     impl Hasher for HasherSHA1 {
         const NAME: &'static str = "SHA-1";
 
-        fn new() -> Self {
-            Self::new()
-        }
+        fn new() -> Self { Self::new() }
 
         fn finalize(mut self) -> DigestResult {
             DigestResult::Sha1((*self.hasher.finish().unwrap()).try_into().unwrap())
@@ -284,9 +246,7 @@ mod openssl_util {
 
         #[allow(unused_braces)] // https://github.com/rust-lang/rust/issues/116347
         #[instrument(name = "openssl_util::HasherSHA1::update", skip_all)]
-        fn update(&mut self, data: &[u8]) {
-            self.hasher.update(data).unwrap()
-        }
+        fn update(&mut self, data: &[u8]) { self.hasher.update(data).unwrap() }
     }
 }
 

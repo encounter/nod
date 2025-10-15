@@ -45,17 +45,11 @@ struct WBFSHeader {
 }
 
 impl WBFSHeader {
-    fn sector_size(&self) -> u32 {
-        1 << self.sector_size_shift
-    }
+    fn sector_size(&self) -> u32 { 1 << self.sector_size_shift }
 
-    fn block_size(&self) -> u32 {
-        1 << self.block_size_shift
-    }
+    fn block_size(&self) -> u32 { 1 << self.block_size_shift }
 
-    fn max_blocks(&self) -> u32 {
-        NUM_WII_SECTORS >> (self.block_size_shift - 15)
-    }
+    fn max_blocks(&self) -> u32 { NUM_WII_SECTORS >> (self.block_size_shift - 15) }
 }
 
 const DISC_HEADER_SIZE: usize = 0x100;
@@ -149,9 +143,7 @@ impl BlockReader for BlockReaderWBFS {
         Ok(Block::new(block_idx, block_size, BlockKind::Raw))
     }
 
-    fn block_size(&self) -> u32 {
-        self.header.block_size()
-    }
+    fn block_size(&self) -> u32 { self.header.block_size() }
 
     fn meta(&self) -> DiscMeta {
         let mut result = DiscMeta {
@@ -209,7 +201,7 @@ impl BlockProcessor for BlockProcessorWBFS {
             &mut self.lfg,
             self.disc_id,
             self.disc_num,
-            self.scrub_update_partition,
+            self.scrub_update_partition
         )? {
             CheckBlockResult::Normal => {
                 BlockResult { block_idx, disc_data, block_data, meta: CheckBlockResult::Normal }
@@ -329,7 +321,7 @@ impl DiscWriter for DiscWriterWBFS {
                 lfg: LaggedFibonacci::default(),
                 disc_id,
                 disc_num,
-                scrub_update_partition: options.scrub_update_partition,
+                scrub_update_partition: options.scrub_update_partition
             },
             self.block_count as u32,
             options.processor_threads,
@@ -391,11 +383,7 @@ impl DiscWriter for DiscWriterWBFS {
         Ok(finalization)
     }
 
-    fn progress_bound(&self) -> u64 {
-        self.inner.disc_size()
-    }
+    fn progress_bound(&self) -> u64 { self.inner.disc_size() }
 
-    fn weight(&self) -> DiscWriterWeight {
-        DiscWriterWeight::Medium
-    }
+    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Medium }
 }

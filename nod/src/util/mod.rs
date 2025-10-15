@@ -37,8 +37,7 @@ where
 /// A reader with a fixed window.
 #[derive(Clone)]
 pub struct WindowedReader<T>
-where
-    T: BufRead + Seek,
+where T: BufRead + Seek
 {
     base: T,
     pos: u64,
@@ -47,8 +46,7 @@ where
 }
 
 impl<T> WindowedReader<T>
-where
-    T: BufRead + Seek,
+where T: BufRead + Seek
 {
     /// Creates a new windowed stream with offset and size.
     ///
@@ -62,14 +60,11 @@ where
     /// Returns the length of the window.
     #[inline]
     #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> u64 {
-        self.end - self.begin
-    }
+    pub fn len(&self) -> u64 { self.end - self.begin }
 }
 
 impl<T> Read for WindowedReader<T>
-where
-    T: BufRead + Seek,
+where T: BufRead + Seek
 {
     #[inline]
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
@@ -82,8 +77,7 @@ where
 }
 
 impl<T> BufRead for WindowedReader<T>
-where
-    T: BufRead + Seek,
+where T: BufRead + Seek
 {
     #[inline]
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
@@ -104,8 +98,7 @@ where
 }
 
 impl<T> Seek for WindowedReader<T>
-where
-    T: BufRead + Seek,
+where T: BufRead + Seek
 {
     #[inline]
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
@@ -125,16 +118,12 @@ where
     }
 
     #[inline]
-    fn stream_position(&mut self) -> io::Result<u64> {
-        Ok(self.pos)
-    }
+    fn stream_position(&mut self) -> io::Result<u64> { Ok(self.pos) }
 }
 
 #[inline(always)]
 pub(crate) fn div_rem<T>(x: T, y: T) -> (T, T)
-where
-    T: Div<Output = T> + Rem<Output = T> + Copy,
-{
+where T: Div<Output = T> + Rem<Output = T> + Copy {
     (x / y, x % y)
 }
 
@@ -148,14 +137,10 @@ macro_rules! impl_align {
     ($ty:ident) => {
         impl Align for $ty {
             #[inline(always)]
-            fn align_up(self, align: Self) -> Self {
-                (self + (align - 1)) & !(align - 1)
-            }
+            fn align_up(self, align: Self) -> Self { (self + (align - 1)) & !(align - 1) }
 
             #[inline(always)]
-            fn align_down(self, align: Self) -> Self {
-                self & !(align - 1)
-            }
+            fn align_down(self, align: Self) -> Self { self & !(align - 1) }
         }
     };
 }

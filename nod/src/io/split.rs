@@ -20,9 +20,7 @@ struct Split<T> {
 }
 
 impl<T> Split<T> {
-    fn contains(&self, pos: u64) -> bool {
-        self.begin <= pos && pos < self.begin + self.size
-    }
+    fn contains(&self, pos: u64) -> bool { self.begin <= pos && pos < self.begin + self.size }
 }
 
 // .iso.1, .iso.2, etc.
@@ -58,9 +56,7 @@ fn split_path_3(input: &Path, index: u32) -> PathBuf {
 }
 
 impl SplitFileReader {
-    pub fn empty() -> Self {
-        Self { files: Vec::new(), open_file: Default::default() }
-    }
+    pub fn empty() -> Self { Self { files: Vec::new(), open_file: Default::default() } }
 
     pub fn new(path: &Path) -> Result<Self> {
         let mut files = vec![];
@@ -101,15 +97,11 @@ impl SplitFileReader {
         Ok(())
     }
 
-    pub fn len(&self) -> u64 {
-        self.files.last().map_or(0, |f| f.begin + f.size)
-    }
+    pub fn len(&self) -> u64 { self.files.last().map_or(0, |f| f.begin + f.size) }
 }
 
 impl Clone for SplitFileReader {
-    fn clone(&self) -> Self {
-        Self { files: self.files.clone(), open_file: Default::default() }
-    }
+    fn clone(&self) -> Self { Self { files: self.files.clone(), open_file: Default::default() } }
 }
 
 impl DiscStream for SplitFileReader {
@@ -146,7 +138,5 @@ impl DiscStream for SplitFileReader {
         Ok(())
     }
 
-    fn stream_len(&mut self) -> io::Result<u64> {
-        Ok(self.len())
-    }
+    fn stream_len(&mut self) -> io::Result<u64> { Ok(self.len()) }
 }

@@ -163,19 +163,13 @@ impl DiscReader {
     }
 
     #[inline]
-    pub fn reset(&mut self) {
-        self.pos = 0;
-    }
+    pub fn reset(&mut self) { self.pos = 0; }
 
     #[inline]
-    pub fn position(&self) -> u64 {
-        self.pos
-    }
+    pub fn position(&self) -> u64 { self.pos }
 
     #[inline]
-    pub fn disc_size(&self) -> u64 {
-        self.size
-    }
+    pub fn disc_size(&self) -> u64 { self.size }
 
     #[inline]
     pub fn header(&self) -> &DiscHeader {
@@ -247,9 +241,7 @@ impl DiscReader {
     }
 
     #[inline]
-    pub fn meta(&self) -> DiscMeta {
-        self.io.meta()
-    }
+    pub fn meta(&self) -> DiscMeta { self.io.meta() }
 
     /// Opens a new, decrypted partition read stream for the specified partition index.
     pub fn open_partition(
@@ -408,9 +400,7 @@ impl BufRead for DiscReader {
     }
 
     #[inline]
-    fn consume(&mut self, amt: usize) {
-        self.pos += amt as u64;
-    }
+    fn consume(&mut self, amt: usize) { self.pos += amt as u64; }
 }
 
 impl_read_for_bufread!(DiscReader);

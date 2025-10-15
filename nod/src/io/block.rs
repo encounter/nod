@@ -116,9 +116,7 @@ pub const WIA_MAGIC: MagicBytes = *b"WIA\x01";
 pub const RVZ_MAGIC: MagicBytes = *b"RVZ\x01";
 
 pub fn detect<R>(stream: &mut R) -> io::Result<Option<Format>>
-where
-    R: Read + ?Sized,
-{
+where R: Read + ?Sized {
     match read_from(stream) {
         Ok(ref magic) => Ok(detect_internal(magic)),
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),

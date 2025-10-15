@@ -118,9 +118,7 @@ impl WIAFileHeader {
         Ok(())
     }
 
-    pub fn is_rvz(&self) -> bool {
-        self.magic == RVZ_MAGIC
-    }
+    pub fn is_rvz(&self) -> bool { self.magic == RVZ_MAGIC }
 }
 
 /// Disc kind
@@ -142,9 +140,7 @@ impl From<DiscKind> for u32 {
 }
 
 impl From<DiscKind> for U32 {
-    fn from(value: DiscKind) -> Self {
-        u32::from(value).into()
-    }
+    fn from(value: DiscKind) -> Self { u32::from(value).into() }
 }
 
 impl TryFrom<u32> for DiscKind {
@@ -190,9 +186,7 @@ impl From<WIACompression> for u32 {
 }
 
 impl From<WIACompression> for U32 {
-    fn from(value: WIACompression) -> Self {
-        u32::from(value).into()
-    }
+    fn from(value: WIACompression) -> Self { u32::from(value).into() }
 }
 
 impl TryFrom<u32> for WIACompression {
@@ -338,13 +332,9 @@ pub struct WIAPartitionData {
 static_assert!(size_of::<WIAPartitionData>() == 0x10);
 
 impl WIAPartitionData {
-    pub fn start_sector(&self) -> u32 {
-        self.first_sector.get()
-    }
+    pub fn start_sector(&self) -> u32 { self.first_sector.get() }
 
-    pub fn end_sector(&self) -> u32 {
-        self.first_sector.get() + self.num_sectors.get()
-    }
+    pub fn end_sector(&self) -> u32 { self.first_sector.get() + self.num_sectors.get() }
 
     pub fn contains_sector(&self, sector: u32) -> bool {
         let start = self.first_sector.get();
@@ -409,17 +399,11 @@ pub struct WIARawData {
 }
 
 impl WIARawData {
-    pub fn start_offset(&self) -> u64 {
-        self.raw_data_offset.get().align_down(SECTOR_SIZE as u64)
-    }
+    pub fn start_offset(&self) -> u64 { self.raw_data_offset.get().align_down(SECTOR_SIZE as u64) }
 
-    pub fn start_sector(&self) -> u32 {
-        (self.start_offset() / SECTOR_SIZE as u64) as u32
-    }
+    pub fn start_sector(&self) -> u32 { (self.start_offset() / SECTOR_SIZE as u64) as u32 }
 
-    pub fn end_offset(&self) -> u64 {
-        self.raw_data_offset.get() + self.raw_data_size.get()
-    }
+    pub fn end_offset(&self) -> u64 { self.raw_data_offset.get() + self.raw_data_size.get() }
 
     pub fn end_sector(&self) -> u32 {
         // Round up for unaligned raw data end offsets
@@ -481,14 +465,10 @@ const COMPRESSED_BIT: u32 = 1 << 31;
 
 impl RVZGroup {
     #[inline]
-    pub fn data_size(&self) -> u32 {
-        self.data_size_and_flag.get() & !COMPRESSED_BIT
-    }
+    pub fn data_size(&self) -> u32 { self.data_size_and_flag.get() & !COMPRESSED_BIT }
 
     #[inline]
-    pub fn is_compressed(&self) -> bool {
-        self.data_size_and_flag.get() & COMPRESSED_BIT != 0
-    }
+    pub fn is_compressed(&self) -> bool { self.data_size_and_flag.get() & COMPRESSED_BIT != 0 }
 }
 
 impl From<&WIAGroup> for RVZGroup {
@@ -988,11 +968,10 @@ impl BlockReader for BlockReaderWIA {
         }
 
         let mut block = if info.in_partition {
-            let mut block = Block::sectors(
-                info.sector,
-                info.num_sectors,
-                BlockKind::PartDecrypted { hash_block: false },
-            );
+            let mut block =
+                Block::sectors(info.sector, info.num_sectors, BlockKind::PartDecrypted {
+                    hash_block: false,
+                });
             block.hash_exceptions = exception_lists.into_boxed_slice();
             block
         } else {
@@ -1002,9 +981,7 @@ impl BlockReader for BlockReaderWIA {
         Ok(block)
     }
 
-    fn block_size(&self) -> u32 {
-        self.disc.chunk_size.get()
-    }
+    fn block_size(&self) -> u32 { self.disc.chunk_size.get() }
 
     fn meta(&self) -> DiscMeta {
         let level = self.disc.compression_level.get();
@@ -1900,9 +1877,7 @@ impl DiscWriter for DiscWriterWIA {
         Ok(finalization)
     }
 
-    fn progress_bound(&self) -> u64 {
-        self.inner.disc_size()
-    }
+    fn progress_bound(&self) -> u64 { self.inner.disc_size() }
 
     fn weight(&self) -> DiscWriterWeight {
         if self.disc.compression() == WIACompression::None {

@@ -60,17 +60,13 @@ impl FromStr for LogLevel {
 
 impl fmt::Display for LogLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                LogLevel::Error => "error",
-                LogLevel::Warn => "warn",
-                LogLevel::Info => "info",
-                LogLevel::Debug => "debug",
-                LogLevel::Trace => "trace",
-            }
-        )
+        write!(f, "{}", match self {
+            LogLevel::Error => "error",
+            LogLevel::Warn => "warn",
+            LogLevel::Info => "info",
+            LogLevel::Debug => "debug",
+            LogLevel::Trace => "trace",
+        })
     }
 }
 
