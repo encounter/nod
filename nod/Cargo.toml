@@ -18,13 +18,13 @@ categories = ["command-line-utilities", "parser-implementations"]
 default = ["compress-bzip2", "compress-lzma", "compress-zlib", "compress-zstd"]
 compress-bzip2 = ["bzip2"]
 compress-lzma = ["liblzma", "liblzma-sys"]
-compress-zlib = ["adler", "miniz_oxide"]
+compress-zlib = ["adler2", "miniz_oxide"]
 compress-zstd = ["zstd", "zstd-safe"]
 openssl = ["dep:openssl"]
 openssl-vendored = ["openssl", "openssl/vendored"]
 
 [dependencies]
-adler = { version = "1.0", optional = true }
+adler2 = { version = "2.0", optional = true }
 aes = "0.9.0-rc.0"
 base16ct = "0.2"
 bytes = "1.10"
@@ -52,3 +52,4 @@ xxhash-rust = { version = "0.8", features = ["xxh64"] }
 zerocopy = { workspace = true }
 zstd = { version = "0.13", optional = true, default-features = false }
 zstd-safe = { version = "7.2", optional = true, default-features = false }
+
