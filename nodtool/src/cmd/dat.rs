@@ -9,7 +9,7 @@ use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use nod::{
     Result, ResultContext,
     read::{DiscOptions, DiscReader, PartitionEncryption},
-    write::{DiscWriter, FormatOptions, ProcessOptions},
+    write::{DiscWriter, FormatOptions, ProcessOptions, ScrubLevel},
 };
 
 use crate::util::{redump, redump::GameResult};
@@ -192,7 +192,7 @@ fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
             digest_md5: false,
             digest_sha1: true,
             digest_xxh64: false,
-            scrub_update_partition: false,
+            scrub: ScrubLevel::None,
         },
     )?;
     pb.finish();
