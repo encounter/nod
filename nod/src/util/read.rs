@@ -138,7 +138,9 @@ where
 
 #[inline(always)]
 pub fn read_u16_be<R>(reader: &mut R) -> io::Result<u16>
-where R: Read + ?Sized {
+where
+    R: Read + ?Sized,
+{
     let mut buf = [0u8; 2];
     reader.read_exact(&mut buf)?;
     Ok(u16::from_be_bytes(buf))
@@ -146,7 +148,9 @@ where R: Read + ?Sized {
 
 #[inline(always)]
 pub fn read_u32_be<R>(reader: &mut R) -> io::Result<u32>
-where R: Read + ?Sized {
+where
+    R: Read + ?Sized,
+{
     let mut buf = [0u8; 4];
     reader.read_exact(&mut buf)?;
     Ok(u32::from_be_bytes(buf))
@@ -154,14 +158,18 @@ where R: Read + ?Sized {
 
 #[inline(always)]
 pub fn read_u64_be<R>(reader: &mut R) -> io::Result<u64>
-where R: Read + ?Sized {
+where
+    R: Read + ?Sized,
+{
     let mut buf = [0u8; 8];
     reader.read_exact(&mut buf)?;
     Ok(u64::from_be_bytes(buf))
 }
 
 pub fn read_with_zero_fill<R>(r: &mut R, mut buf: &mut [u8]) -> io::Result<usize>
-where R: Read + ?Sized {
+where
+    R: Read + ?Sized,
+{
     let mut total = 0;
     while !buf.is_empty() {
         let read = r.read(buf)?;
@@ -177,7 +185,9 @@ where R: Read + ?Sized {
 }
 
 pub fn box_to_bytes<T>(b: Box<T>) -> Box<[u8]>
-where T: IntoBytes {
+where
+    T: IntoBytes,
+{
     let p = Box::into_raw(b);
     let sp = unsafe { std::slice::from_raw_parts_mut(p as *mut u8, size_of::<T>()) };
     unsafe { Box::from_raw(sp) }

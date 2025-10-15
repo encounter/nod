@@ -167,7 +167,9 @@ impl BlockReader for BlockReaderTGC {
         Ok(Block::sectors(sector, count, if read == 0 { BlockKind::None } else { BlockKind::Raw }))
     }
 
-    fn block_size(&self) -> u32 { SECTOR_SIZE as u32 }
+    fn block_size(&self) -> u32 {
+        SECTOR_SIZE as u32
+    }
 
     fn meta(&self) -> DiscMeta {
         DiscMeta { format: Format::Tgc, disc_size: Some(self.inner.len()), ..Default::default() }
@@ -329,7 +331,11 @@ impl DiscWriter for DiscWriterTGC {
         Ok(DiscFinalization::default())
     }
 
-    fn progress_bound(&self) -> u64 { self.output_size }
+    fn progress_bound(&self) -> u64 {
+        self.output_size
+    }
 
-    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Light }
+    fn weight(&self) -> DiscWriterWeight {
+        DiscWriterWeight::Light
+    }
 }

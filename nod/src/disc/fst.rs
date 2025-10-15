@@ -77,11 +77,15 @@ impl Node {
 
     /// Whether the node is a file.
     #[inline]
-    pub fn is_file(&self) -> bool { self.kind == 0 }
+    pub fn is_file(&self) -> bool {
+        self.kind == 0
+    }
 
     /// Whether the node is a directory.
     #[inline]
-    pub fn is_dir(&self) -> bool { self.kind == 1 }
+    pub fn is_dir(&self) -> bool {
+        self.kind == 1
+    }
 
     /// Offset in the string table to the filename.
     #[inline]
@@ -120,11 +124,15 @@ impl Node {
     ///
     /// Number of child files and directories recursively is `length - offset`.
     #[inline]
-    pub fn length(&self) -> u32 { self.length.get() }
+    pub fn length(&self) -> u32 {
+        self.length.get()
+    }
 
     /// Set the length of the node. See [`Node::length`] for details.
     #[inline]
-    pub fn set_length(&mut self, length: u32) { self.length.set(length); }
+    pub fn set_length(&mut self, length: u32) {
+        self.length.set(length);
+    }
 }
 
 /// A view into the file system table (FST).
@@ -154,7 +162,9 @@ impl<'a> Fst<'a> {
 
     /// Iterate over the nodes in the FST.
     #[inline]
-    pub fn iter(&self) -> FstIter<'_> { FstIter { fst: self.clone(), idx: 1, segments: vec![] } }
+    pub fn iter(&self) -> FstIter<'_> {
+        FstIter { fst: self.clone(), idx: 1, segments: vec![] }
+    }
 
     /// Get the name of a node.
     pub fn get_name(&self, node: Node) -> Result<Cow<'a, str>, String> {
@@ -209,7 +219,9 @@ impl<'a> Fst<'a> {
     }
 
     /// Count the number of files in the FST.
-    pub fn num_files(&self) -> usize { self.nodes.iter().filter(|n| n.is_file()).count() }
+    pub fn num_files(&self) -> usize {
+        self.nodes.iter().filter(|n| n.is_file()).count()
+    }
 }
 
 /// Iterator over the nodes in an FST.

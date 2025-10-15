@@ -172,7 +172,9 @@ impl PreloaderCache {
         self.inflight.remove(&request);
     }
 
-    fn remove(&mut self, request: &SectorGroupRequest) { self.inflight.remove(request); }
+    fn remove(&mut self, request: &SectorGroupRequest) {
+        self.inflight.remove(request);
+    }
 
     fn contains(&self, request: &SectorGroupRequest) -> bool {
         self.lru_cache.contains(request) || self.inflight.contains_key(request)
@@ -325,7 +327,9 @@ impl Preloader {
 }
 
 #[inline]
-fn map_poisoned<T>(_: std::sync::PoisonError<T>) -> io::Error { io::Error::other("Mutex poisoned") }
+fn map_poisoned<T>(_: std::sync::PoisonError<T>) -> io::Error {
+    io::Error::other("Mutex poisoned")
+}
 
 pub struct SectorGroupLoader {
     io: Box<dyn BlockReader>,

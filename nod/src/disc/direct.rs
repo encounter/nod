@@ -66,7 +66,9 @@ impl DirectDiscReader {
         self.mode = mode;
     }
 
-    pub fn into_inner(self) -> Box<dyn BlockReader> { self.io }
+    pub fn into_inner(self) -> Box<dyn BlockReader> {
+        self.io
+    }
 }
 
 impl BufRead for DirectDiscReader {
@@ -115,7 +117,9 @@ impl BufRead for DirectDiscReader {
     }
 
     #[inline]
-    fn consume(&mut self, amt: usize) { self.pos += amt as u64; }
+    fn consume(&mut self, amt: usize) {
+        self.pos += amt as u64;
+    }
 }
 
 impl_read_for_bufread!(DirectDiscReader);
@@ -135,11 +139,17 @@ impl Seek for DirectDiscReader {
         Ok(self.pos)
     }
 
-    fn stream_position(&mut self) -> io::Result<u64> { Ok(self.pos) }
+    fn stream_position(&mut self) -> io::Result<u64> {
+        Ok(self.pos)
+    }
 }
 
 impl PartitionReader for DirectDiscReader {
-    fn is_wii(&self) -> bool { unimplemented!() }
+    fn is_wii(&self) -> bool {
+        unimplemented!()
+    }
 
-    fn meta(&mut self) -> Result<PartitionMeta> { unimplemented!() }
+    fn meta(&mut self) -> Result<PartitionMeta> {
+        unimplemented!()
+    }
 }

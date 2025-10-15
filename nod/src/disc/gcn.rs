@@ -84,7 +84,9 @@ impl BufRead for PartitionReaderGC {
     }
 
     #[inline]
-    fn consume(&mut self, amt: usize) { self.pos += amt as u64; }
+    fn consume(&mut self, amt: usize) {
+        self.pos += amt as u64;
+    }
 }
 
 impl_read_for_bufread!(PartitionReaderGC);
@@ -99,11 +101,15 @@ impl Seek for PartitionReaderGC {
         Ok(self.pos)
     }
 
-    fn stream_position(&mut self) -> io::Result<u64> { Ok(self.pos) }
+    fn stream_position(&mut self) -> io::Result<u64> {
+        Ok(self.pos)
+    }
 }
 
 impl PartitionReader for PartitionReaderGC {
-    fn is_wii(&self) -> bool { false }
+    fn is_wii(&self) -> bool {
+        false
+    }
 
     fn meta(&mut self) -> Result<PartitionMeta> {
         if let Some(meta) = &self.meta {

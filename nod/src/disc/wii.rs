@@ -78,7 +78,9 @@ pub(crate) struct WiiPartEntry {
 static_assert!(size_of::<WiiPartEntry>() == 8);
 
 impl WiiPartEntry {
-    pub(crate) fn offset(&self) -> u64 { (self.offset.get() as u64) << 2 }
+    pub(crate) fn offset(&self) -> u64 {
+        (self.offset.get() as u64) << 2
+    }
 }
 
 pub(crate) const WII_PART_GROUP_OFF: u64 = 0x40000;
@@ -93,7 +95,9 @@ pub(crate) struct WiiPartGroup {
 static_assert!(size_of::<WiiPartGroup>() == 8);
 
 impl WiiPartGroup {
-    pub(crate) fn part_entry_off(&self) -> u64 { (self.part_entry_off.get() as u64) << 2 }
+    pub(crate) fn part_entry_off(&self) -> u64 {
+        (self.part_entry_off.get() as u64) << 2
+    }
 }
 
 /// Signed blob header
@@ -274,28 +278,44 @@ static_assert!(size_of::<WiiPartitionHeader>() == 0x2C0);
 
 impl WiiPartitionHeader {
     /// TMD size in bytes
-    pub fn tmd_size(&self) -> u64 { self.tmd_size.get() as u64 }
+    pub fn tmd_size(&self) -> u64 {
+        self.tmd_size.get() as u64
+    }
 
     /// TMD offset in bytes (relative to the partition start)
-    pub fn tmd_off(&self) -> u64 { (self.tmd_off.get() as u64) << 2 }
+    pub fn tmd_off(&self) -> u64 {
+        (self.tmd_off.get() as u64) << 2
+    }
 
     /// Certificate chain size in bytes
-    pub fn cert_chain_size(&self) -> u64 { self.cert_chain_size.get() as u64 }
+    pub fn cert_chain_size(&self) -> u64 {
+        self.cert_chain_size.get() as u64
+    }
 
     /// Certificate chain offset in bytes (relative to the partition start)
-    pub fn cert_chain_off(&self) -> u64 { (self.cert_chain_off.get() as u64) << 2 }
+    pub fn cert_chain_off(&self) -> u64 {
+        (self.cert_chain_off.get() as u64) << 2
+    }
 
     /// H3 table offset in bytes (relative to the partition start)
-    pub fn h3_table_off(&self) -> u64 { (self.h3_table_off.get() as u64) << 2 }
+    pub fn h3_table_off(&self) -> u64 {
+        (self.h3_table_off.get() as u64) << 2
+    }
 
     /// H3 table size in bytes (always H3_TABLE_SIZE)
-    pub fn h3_table_size(&self) -> u64 { H3_TABLE_SIZE as u64 }
+    pub fn h3_table_size(&self) -> u64 {
+        H3_TABLE_SIZE as u64
+    }
 
     /// Data offset in bytes (relative to the partition start)
-    pub fn data_off(&self) -> u64 { (self.data_off.get() as u64) << 2 }
+    pub fn data_off(&self) -> u64 {
+        (self.data_off.get() as u64) << 2
+    }
 
     /// Data size in bytes
-    pub fn data_size(&self) -> u64 { (self.data_size.get() as u64) << 2 }
+    pub fn data_size(&self) -> u64 {
+        (self.data_size.get() as u64) << 2
+    }
 }
 
 pub(crate) struct PartitionReaderWii {
@@ -342,7 +362,9 @@ impl PartitionReaderWii {
     }
 
     #[inline]
-    pub fn len(&self) -> u64 { self.partition.data_size() }
+    pub fn len(&self) -> u64 {
+        self.partition.data_size()
+    }
 }
 
 impl BufRead for PartitionReaderWii {
@@ -409,7 +431,9 @@ impl BufRead for PartitionReaderWii {
     }
 
     #[inline]
-    fn consume(&mut self, amt: usize) { self.pos += amt as u64; }
+    fn consume(&mut self, amt: usize) {
+        self.pos += amt as u64;
+    }
 }
 
 impl_read_for_bufread!(PartitionReaderWii);
@@ -424,7 +448,9 @@ impl Seek for PartitionReaderWii {
         Ok(self.pos)
     }
 
-    fn stream_position(&mut self) -> io::Result<u64> { Ok(self.pos) }
+    fn stream_position(&mut self) -> io::Result<u64> {
+        Ok(self.pos)
+    }
 }
 
 fn verify_hashes(buf: &[u8; SECTOR_GROUP_SIZE], group_idx: u32, h3_table: &[u8]) -> io::Result<()> {
@@ -487,7 +513,9 @@ fn verify_hashes(buf: &[u8; SECTOR_GROUP_SIZE], group_idx: u32, h3_table: &[u8])
 }
 
 impl PartitionReader for PartitionReaderWii {
-    fn is_wii(&self) -> bool { true }
+    fn is_wii(&self) -> bool {
+        true
+    }
 
     fn meta(&mut self) -> Result<PartitionMeta> {
         if let Some(meta) = &self.meta {

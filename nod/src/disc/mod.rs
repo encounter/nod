@@ -89,7 +89,9 @@ static_assert!(size_of::<DiscHeader>() == 0x400);
 impl DiscHeader {
     /// Game ID as a string.
     #[inline]
-    pub fn game_id_str(&self) -> &str { from_utf8(&self.game_id).unwrap_or("[invalid]") }
+    pub fn game_id_str(&self) -> &str {
+        from_utf8(&self.game_id).unwrap_or("[invalid]")
+    }
 
     /// Game title as a string.
     #[inline]
@@ -102,19 +104,27 @@ impl DiscHeader {
 
     /// Whether this is a GameCube disc.
     #[inline]
-    pub fn is_gamecube(&self) -> bool { self.gcn_magic == GCN_MAGIC }
+    pub fn is_gamecube(&self) -> bool {
+        self.gcn_magic == GCN_MAGIC
+    }
 
     /// Whether this is a Wii disc.
     #[inline]
-    pub fn is_wii(&self) -> bool { self.wii_magic == WII_MAGIC }
+    pub fn is_wii(&self) -> bool {
+        self.wii_magic == WII_MAGIC
+    }
 
     /// Whether the disc has partition data hashes.
     #[inline]
-    pub fn has_partition_hashes(&self) -> bool { self.no_partition_hashes == 0 }
+    pub fn has_partition_hashes(&self) -> bool {
+        self.no_partition_hashes == 0
+    }
 
     /// Whether the disc has partition data encryption.
     #[inline]
-    pub fn has_partition_encryption(&self) -> bool { self.no_partition_encryption == 0 }
+    pub fn has_partition_encryption(&self) -> bool {
+        self.no_partition_encryption == 0
+    }
 }
 
 /// The debug block of a disc partition.

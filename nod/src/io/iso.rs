@@ -43,7 +43,9 @@ impl BlockReader for BlockReaderISO {
         Ok(Block::sector(sector, BlockKind::Raw))
     }
 
-    fn block_size(&self) -> u32 { SECTOR_SIZE as u32 }
+    fn block_size(&self) -> u32 {
+        SECTOR_SIZE as u32
+    }
 
     fn meta(&self) -> DiscMeta {
         DiscMeta {
@@ -83,7 +85,11 @@ impl DiscWriter for DiscReader {
         Ok(finalization)
     }
 
-    fn progress_bound(&self) -> u64 { self.disc_size() }
+    fn progress_bound(&self) -> u64 {
+        self.disc_size()
+    }
 
-    fn weight(&self) -> DiscWriterWeight { DiscWriterWeight::Light }
+    fn weight(&self) -> DiscWriterWeight {
+        DiscWriterWeight::Light
+    }
 }

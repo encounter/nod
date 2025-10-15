@@ -58,7 +58,9 @@ impl NFSHeader {
         Ok(())
     }
 
-    fn lba_ranges(&self) -> &[LBARange] { &self.lba_ranges[..self.num_lba_ranges.get() as usize] }
+    fn lba_ranges(&self) -> &[LBARange] {
+        &self.lba_ranges[..self.num_lba_ranges.get() as usize]
+    }
 
     fn calculate_num_files(&self) -> u32 {
         let sector_count =
@@ -126,7 +128,9 @@ impl BlockReader for BlockReaderNFS {
         Ok(Block::sector(sector, BlockKind::PartDecrypted { hash_block: true }))
     }
 
-    fn block_size(&self) -> u32 { SECTOR_SIZE as u32 }
+    fn block_size(&self) -> u32 {
+        SECTOR_SIZE as u32
+    }
 
     fn meta(&self) -> DiscMeta {
         DiscMeta { format: Format::Nfs, decrypted: true, ..Default::default() }
@@ -134,7 +138,9 @@ impl BlockReader for BlockReaderNFS {
 }
 
 fn get_path<P>(directory: &Path, path: P) -> PathBuf
-where P: AsRef<Path> {
+where
+    P: AsRef<Path>,
+{
     let mut buf = directory.to_path_buf();
     for component in path.as_ref().components() {
         match component {

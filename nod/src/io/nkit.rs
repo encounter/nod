@@ -108,7 +108,9 @@ impl NKitHeader {
     }
 
     pub fn read_from<R>(reader: &mut R, block_size: u32, has_junk_bits: bool) -> io::Result<Self>
-    where R: Read + ?Sized {
+    where
+        R: Read + ?Sized,
+    {
         let version_string: [u8; 8] = read_from(reader)?;
         if version_string[0..7] != VERSION_PREFIX
             || version_string[7] < b'1'
@@ -202,7 +204,9 @@ impl NKitHeader {
     }
 
     pub fn write_to<W>(&self, w: &mut W) -> io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         w.write_all(&VERSION_PREFIX)?;
         w.write_all(&[b'0' + self.version])?;
         let flags = self.calc_flags();
@@ -266,15 +270,21 @@ impl NKitHeader {
 pub struct JunkBits(Vec<u8>);
 
 impl JunkBits {
-    pub fn new(block_size: u32) -> Self { Self(vec![0; Self::len(block_size)]) }
+    pub fn new(block_size: u32) -> Self {
+        Self(vec![0; Self::len(block_size)])
+    }
 
     pub fn read_from<R>(reader: &mut R, block_size: u32) -> io::Result<Self>
-    where R: Read + ?Sized {
+    where
+        R: Read + ?Sized,
+    {
         Ok(Self(read_vec(reader, Self::len(block_size))?))
     }
 
     pub fn write_to<W>(&self, w: &mut W) -> io::Result<()>
-    where W: Write + ?Sized {
+    where
+        W: Write + ?Sized,
+    {
         w.write_all(&self.0)
     }
 
@@ -307,7 +317,9 @@ pub struct ReadAdapter<'a> {
 }
 
 impl<'a> ReadAdapter<'a> {
-    pub fn new(reader: &'a mut dyn DiscStream, offset: u64) -> Self { Self { reader, pos: offset } }
+    pub fn new(reader: &'a mut dyn DiscStream, offset: u64) -> Self {
+        Self { reader, pos: offset }
+    }
 }
 
 impl Read for ReadAdapter<'_> {
