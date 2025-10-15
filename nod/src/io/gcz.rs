@@ -4,6 +4,7 @@ use std::{
     mem::size_of,
     sync::Arc,
 };
+
 use adler2::adler32_slice;
 use bytes::{BufMut, Bytes, BytesMut};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, little_endian::*};
