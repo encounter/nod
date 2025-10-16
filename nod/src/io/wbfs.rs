@@ -240,7 +240,6 @@ impl DiscWriterWBFS {
         if options.format != Format::Wbfs {
             return Err(Error::DiscFormat("Invalid format for WBFS writer".to_string()));
         }
-
         if options.compression != Compression::None {
             return Err(Error::DiscFormat("WBFS does not support compression".to_string()));
         }
