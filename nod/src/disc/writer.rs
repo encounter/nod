@@ -9,7 +9,7 @@ use dyn_clone::DynClone;
 
 use crate::{
     Error, Result, ResultContext,
-    common::PartitionInfo,
+    common::{PartitionInfo, PartitionKind},
     disc::{
         SECTOR_SIZE,
         reader::DiscReader,
@@ -192,6 +192,7 @@ pub enum CheckBlockResult {
 }
 
 /// Check if a block is zeroed or junk data.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn check_block(
     buf: &[u8],
     decrypted_block: &mut [u8],
@@ -200,12 +201,18 @@ pub(crate) fn check_block(
     lfg: &mut LaggedFibonacci,
     disc_id: [u8; 4],
     disc_num: u8,
+    scrub_update_partition: bool,
 ) -> io::Result<CheckBlockResult> {
     let start_sector = (input_position / SECTOR_SIZE as u64) as u32;
     let end_sector = ((input_position + buf.len() as u64) / SECTOR_SIZE as u64) as u32;
     if let Some(partition) = partition_info.iter().find(|p| {
         p.has_hashes && start_sector >= p.data_start_sector && end_sector < p.data_end_sector
     }) {
+        // Ignore update partition data
+        if scrub_update_partition && partition.kind == PartitionKind::Update {
+            return Ok(CheckBlockResult::Zeroed);
+        }
+
         if input_position % SECTOR_SIZE as u64 != 0 {
             return Err(io::Error::other("Partition block not aligned to sector boundary"));
         }

@@ -70,6 +70,25 @@ pub struct ProcessOptions {
     /// Each digest calculation will run on a separate thread, unaffected by the processor thread
     /// count.
     pub digest_xxh64: bool,
+    /// The level of scrubbing to perform on the disc image.
+    ///
+    /// This may reduce the size of the output disc image by removing unnecessary data, but will
+    /// also prevent reconstruction of the original disc image. Use with caution.
+    ///
+    /// If unsure, use `ScrubLevel::None`.
+    pub scrub: ScrubLevel,
+}
+
+/// The level of scrubbing to perform on the disc image.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrubLevel {
+    /// Do not scrub any data from the disc image.
+    #[default]
+    None,
+    /// Replace the update partition with zeroes to save space.
+    ///
+    /// NOTE: This is currently implemented only for WBFS and CISO.
+    UpdatePartition,
 }
 
 /// A callback for writing disc data.

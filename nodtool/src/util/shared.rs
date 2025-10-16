@@ -11,7 +11,7 @@ use nod::{
     common::Compression,
     disc::DiscHeader,
     read::{DiscMeta, DiscOptions, DiscReader, PartitionEncryption},
-    write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions, ScrubLevel},
 };
 use size::Size;
 
@@ -123,6 +123,7 @@ pub fn convert_and_verify(
             digest_md5: md5,
             digest_sha1: true,
             digest_xxh64: true,
+            scrub: ScrubLevel::None,
         },
     )?;
     pb.finish();

@@ -83,7 +83,7 @@
 //! use nod::{
 //!     common::{Compression, Format},
 //!     read::{DiscOptions, DiscReader, PartitionEncryption},
-//!     write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions},
+//!     write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions, ScrubLevel},
 //! };
 //!
 //! let open_options = DiscOptions {
@@ -121,6 +121,7 @@
 //!     digest_md5: false, // MD5 is slow, skip it
 //!     digest_sha1: true,
 //!     digest_xxh64: true,
+//!     scrub: ScrubLevel::None,
 //! };
 //! // Start processing the disc image.
 //! let finalization = writer

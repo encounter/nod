@@ -30,7 +30,9 @@ use crate::{
         lfg::LaggedFibonacci,
         read::{read_arc_slice_at, read_at, read_box_slice_at},
     },
-    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{
+        DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions, ScrubLevel,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, FromBytes, IntoBytes, Immutable, KnownLayout)]
@@ -165,6 +167,7 @@ struct BlockProcessorWBFS {
     lfg: LaggedFibonacci,
     disc_id: [u8; 4],
     disc_num: u8,
+    scrub_update_partition: bool,
 }
 
 impl Clone for BlockProcessorWBFS {
@@ -177,6 +180,7 @@ impl Clone for BlockProcessorWBFS {
             lfg: LaggedFibonacci::default(),
             disc_id: self.disc_id,
             disc_num: self.disc_num,
+            scrub_update_partition: self.scrub_update_partition,
         }
     }
 }
@@ -199,6 +203,7 @@ impl BlockProcessor for BlockProcessorWBFS {
             &mut self.lfg,
             self.disc_id,
             self.disc_num,
+            self.scrub_update_partition,
         )? {
             CheckBlockResult::Normal => {
                 BlockResult { block_idx, disc_data, block_data, meta: CheckBlockResult::Normal }
@@ -235,6 +240,7 @@ impl DiscWriterWBFS {
         if options.format != Format::Wbfs {
             return Err(Error::DiscFormat("Invalid format for WBFS writer".to_string()));
         }
+
         if options.compression != Compression::None {
             return Err(Error::DiscFormat("WBFS does not support compression".to_string()));
         }
@@ -317,6 +323,7 @@ impl DiscWriter for DiscWriterWBFS {
                 lfg: LaggedFibonacci::default(),
                 disc_id,
                 disc_num,
+                scrub_update_partition: options.scrub == ScrubLevel::UpdatePartition,
             },
             self.block_count as u32,
             options.processor_threads,

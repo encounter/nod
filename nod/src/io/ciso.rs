@@ -31,7 +31,9 @@ use crate::{
         read::{box_to_bytes, read_arc_at},
         static_assert,
     },
-    write::{DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions},
+    write::{
+        DataCallback, DiscFinalization, DiscWriterWeight, FormatOptions, ProcessOptions, ScrubLevel,
+    },
 };
 
 pub const CISO_MAP_SIZE: usize = SECTOR_SIZE - 8;
@@ -145,6 +147,7 @@ struct BlockProcessorCISO {
     lfg: LaggedFibonacci,
     disc_id: [u8; 4],
     disc_num: u8,
+    scrub_update_partition: bool,
 }
 
 impl Clone for BlockProcessorCISO {
@@ -156,6 +159,7 @@ impl Clone for BlockProcessorCISO {
             lfg: LaggedFibonacci::default(),
             disc_id: self.disc_id,
             disc_num: self.disc_num,
+            scrub_update_partition: self.scrub_update_partition,
         }
     }
 }
@@ -178,6 +182,7 @@ impl BlockProcessor for BlockProcessorCISO {
             &mut self.lfg,
             self.disc_id,
             self.disc_num,
+            self.scrub_update_partition,
         )? {
             CheckBlockResult::Normal => {
                 BlockResult { block_idx, disc_data, block_data, meta: CheckBlockResult::Normal }
@@ -264,6 +269,7 @@ impl DiscWriter for DiscWriterCISO {
                 lfg: LaggedFibonacci::default(),
                 disc_id,
                 disc_num,
+                scrub_update_partition: options.scrub == ScrubLevel::UpdatePartition,
             },
             self.block_count,
             options.processor_threads,
