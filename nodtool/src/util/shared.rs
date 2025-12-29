@@ -11,7 +11,7 @@ use nod::{
     common::Compression,
     disc::DiscHeader,
     read::{DiscMeta, DiscOptions, DiscReader, PartitionEncryption},
-    write::{DiscWriter, DiscWriterWeight, FormatOptions, ProcessOptions, ScrubLevel},
+    write::{DiscWriter, FormatOptions, ProcessOptions, ScrubLevel},
 };
 use size::Size;
 
@@ -100,11 +100,15 @@ pub fn convert_and_verify(
         })
         .progress_chars("#>-"));
 
-    let cpus = num_cpus::get();
-    let processor_threads = match disc_writer.weight() {
-        DiscWriterWeight::Light => 0,
-        DiscWriterWeight::Medium => cpus / 2,
-        DiscWriterWeight::Heavy => cpus,
+    #[cfg(feature = "threading")]
+    let processor_threads = {
+        use nod::write::DiscWriterWeight;
+        let cpus = num_cpus::get();
+        match disc_writer.weight() {
+            DiscWriterWeight::Light => 0,
+            DiscWriterWeight::Medium => cpus / 2,
+            DiscWriterWeight::Heavy => cpus,
+        }
     };
 
     let mut total_written = 0u64;
@@ -118,6 +122,7 @@ pub fn convert_and_verify(
             Ok(())
         },
         &ProcessOptions {
+            #[cfg(feature = "threading")]
             processor_threads,
             digest_crc32: true,
             digest_md5: md5,

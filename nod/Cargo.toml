@@ -15,13 +15,14 @@ keywords.workspace = true
 categories = ["command-line-utilities", "parser-implementations"]
 
 [features]
-default = ["compress-bzip2", "compress-lzma", "compress-zlib", "compress-zstd"]
+default = ["compress-bzip2", "compress-lzma", "compress-zlib", "compress-zstd", "threading"]
 compress-bzip2 = ["bzip2"]
 compress-lzma = ["liblzma", "liblzma-sys"]
 compress-zlib = ["adler2", "miniz_oxide"]
 compress-zstd = ["zstd", "zstd-safe"]
 openssl = ["dep:openssl"]
 openssl-vendored = ["openssl", "openssl/vendored"]
+threading = ["dep:crossbeam-channel", "dep:crossbeam-utils"]
 
 [dependencies]
 adler2 = { version = "2.0", optional = true }
@@ -32,8 +33,8 @@ bytes = "1.10"
 bzip2 = { version = "0.6", features = ["static"], optional = true }
 cbc = "0.2.0-rc.1"
 crc32fast = "1.5"
-crossbeam-channel = "0.5"
-crossbeam-utils = "0.8"
+crossbeam-channel = { version = "0.5", optional = true }
+crossbeam-utils = { version = "0.8", optional = true }
 digest = { workspace = true }
 dyn-clone = "1.0"
 encoding_rs = "0.8"

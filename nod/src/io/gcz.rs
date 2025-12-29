@@ -325,6 +325,7 @@ impl DiscWriter for DiscWriterGCZ {
                 compressor: Compressor::new(self.compression, block_size as usize),
             },
             block_count,
+            #[cfg(feature = "threading")]
             options.processor_threads,
             |block| {
                 // Update hashers

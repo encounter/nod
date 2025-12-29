@@ -1,20 +1,25 @@
+#[cfg(feature = "threading")]
+use std::{collections::HashMap, thread::JoinHandle, time::Instant};
 use std::{
-    collections::HashMap,
     fmt::{Display, Formatter},
     io,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
-    thread::JoinHandle,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use bytes::{Bytes, BytesMut};
+#[cfg(feature = "threading")]
 use crossbeam_channel::{Receiver, Sender};
+#[cfg(feature = "threading")]
 use crossbeam_utils::sync::WaitGroup;
 use lru::LruCache;
 use polonius_the_crab::{polonius, polonius_return};
+#[cfg(feature = "threading")]
 use simple_moving_average::{SMA, SingleSumSMA};
-use tracing::{Level, debug, error, instrument, span};
+#[cfg(feature = "threading")]
+use tracing::{Level, span};
+use tracing::{debug, error, instrument};
 use zerocopy::FromZeros;
 
 use crate::{
@@ -59,6 +64,7 @@ pub struct SectorGroup {
     pub start_sector: u32,
     pub data: Bytes,
     pub sector_bitmap: u64,
+    #[allow(unused)]
     pub io_duration: Option<Duration>,
     #[allow(unused)] // TODO WIA hash exceptions
     pub group_hashes: Option<Arc<GroupHashes>>,
@@ -76,10 +82,15 @@ pub type SectorGroupResult = io::Result<SectorGroup>;
 
 #[allow(unused)]
 pub struct Preloader {
+    #[cfg(feature = "threading")]
     request_tx: Sender<SectorGroupRequest>,
+    #[cfg(feature = "threading")]
     request_rx: Receiver<SectorGroupRequest>,
+    #[cfg(feature = "threading")]
     stat_tx: Sender<PreloaderThreadStats>,
+    #[cfg(feature = "threading")]
     stat_rx: Receiver<PreloaderThreadStats>,
+    #[cfg(feature = "threading")]
     threads: Mutex<PreloaderThreads>,
     cache: Arc<Mutex<PreloaderCache>>,
     // Fallback single-threaded loader
@@ -87,6 +98,7 @@ pub struct Preloader {
 }
 
 #[allow(unused)]
+#[cfg(feature = "threading")]
 struct PreloaderThreads {
     join_handles: Vec<JoinHandle<()>>,
     last_adjust: Instant,
@@ -96,6 +108,7 @@ struct PreloaderThreads {
     io_time_avg: SingleSumSMA<Duration, u32, 100>,
 }
 
+#[cfg(feature = "threading")]
 impl PreloaderThreads {
     fn new(join_handles: Vec<JoinHandle<()>>) -> Self {
         Self {
@@ -153,6 +166,7 @@ impl PreloaderThreads {
 }
 
 struct PreloaderCache {
+    #[cfg(feature = "threading")]
     inflight: HashMap<SectorGroupRequest, WaitGroup>,
     lru_cache: LruCache<SectorGroupRequest, SectorGroup>,
 }
@@ -160,6 +174,7 @@ struct PreloaderCache {
 impl Default for PreloaderCache {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "threading")]
             inflight: Default::default(),
             lru_cache: LruCache::new(NonZeroUsize::new(64).unwrap()),
         }
@@ -169,17 +184,21 @@ impl Default for PreloaderCache {
 impl PreloaderCache {
     fn push(&mut self, request: SectorGroupRequest, group: SectorGroup) {
         self.lru_cache.push(request, group);
+        #[cfg(feature = "threading")]
         self.inflight.remove(&request);
     }
 
+    #[cfg(feature = "threading")]
     fn remove(&mut self, request: &SectorGroupRequest) { self.inflight.remove(request); }
 
+    #[cfg(feature = "threading")]
     fn contains(&self, request: &SectorGroupRequest) -> bool {
         self.lru_cache.contains(request) || self.inflight.contains_key(request)
     }
 }
 
 #[allow(unused)]
+#[cfg(feature = "threading")]
 struct PreloaderThreadStats {
     thread_id: usize,
     wait_time: Duration,
@@ -187,6 +206,7 @@ struct PreloaderThreadStats {
     io_time: Duration,
 }
 
+#[cfg(feature = "threading")]
 fn preloader_thread(
     thread_id: usize,
     request_rx: Receiver<SectorGroupRequest>,
@@ -237,6 +257,7 @@ fn preloader_thread(
 }
 
 impl Preloader {
+    #[cfg(feature = "threading")]
     pub fn new(loader: SectorGroupLoader, num_threads: usize) -> Arc<Self> {
         debug!("Creating preloader with {} threads", num_threads);
 
@@ -258,56 +279,73 @@ impl Preloader {
         Arc::new(Self { request_tx, request_rx, stat_tx, stat_rx, threads, cache, loader })
     }
 
+    #[cfg(not(feature = "threading"))]
+    pub fn new(loader: SectorGroupLoader) -> Arc<Self> {
+        debug!("Creating single-threaded preloader");
+        let cache = Arc::new(Mutex::new(PreloaderCache::default()));
+        let loader = Mutex::new(loader);
+        Arc::new(Self { cache, loader })
+    }
+
     #[allow(unused)]
     pub fn shutdown(self) {
-        let guard = self.threads.into_inner().unwrap();
-        for handle in guard.join_handles {
-            handle.join().unwrap();
+        #[cfg(feature = "threading")]
+        {
+            let guard = self.threads.into_inner().unwrap();
+            for handle in guard.join_handles {
+                handle.join().unwrap();
+            }
         }
     }
 
     #[instrument(name = "Preloader::fetch", skip_all)]
     pub fn fetch(&self, request: SectorGroupRequest, max_groups: u32) -> SectorGroupResult {
-        let num_threads = {
-            let mut threads_guard = self.threads.lock().map_err(map_poisoned)?;
-            while let Ok(stat) = self.stat_rx.try_recv() {
-                threads_guard.push_stats(stat, self);
-            }
-            threads_guard.join_handles.len()
-        };
-        let mut cache_guard = self.cache.lock().map_err(map_poisoned)?;
-        // Preload n groups ahead
-        for i in 0..num_threads as u32 {
-            let group_idx = request.group_idx + i;
-            if group_idx >= max_groups {
-                break;
-            }
-            let request = SectorGroupRequest { group_idx, ..request };
-            if cache_guard.contains(&request) {
-                continue;
-            }
-            if self.request_tx.send(request).is_ok() {
-                cache_guard.inflight.insert(request, WaitGroup::new());
-            }
-        }
-        if let Some(cached) = cache_guard.lru_cache.get(&request) {
-            return Ok(cached.clone());
-        }
-        if let Some(wg) = cache_guard.inflight.get(&request) {
-            // Wait for inflight request to finish
-            let wg = wg.clone();
-            drop(cache_guard);
-            {
-                let _span = span!(Level::TRACE, "wg.wait").entered();
-                wg.wait();
-            }
+        #[cfg(feature = "threading")]
+        {
+            let num_threads = {
+                let mut threads_guard = self.threads.lock().map_err(map_poisoned)?;
+                while let Ok(stat) = self.stat_rx.try_recv() {
+                    threads_guard.push_stats(stat, self);
+                }
+                threads_guard.join_handles.len()
+            };
             let mut cache_guard = self.cache.lock().map_err(map_poisoned)?;
+            // Preload n groups ahead
+            for i in 0..num_threads as u32 {
+                let group_idx = request.group_idx + i;
+                if group_idx >= max_groups {
+                    break;
+                }
+                let request = SectorGroupRequest { group_idx, ..request };
+                if cache_guard.contains(&request) {
+                    continue;
+                }
+                if self.request_tx.send(request).is_ok() {
+                    cache_guard.inflight.insert(request, WaitGroup::new());
+                }
+            }
             if let Some(cached) = cache_guard.lru_cache.get(&request) {
                 return Ok(cached.clone());
             }
-        } else {
-            drop(cache_guard);
+            if let Some(wg) = cache_guard.inflight.get(&request) {
+                // Wait for inflight request to finish
+                let wg = wg.clone();
+                drop(cache_guard);
+                {
+                    let _span = span!(Level::TRACE, "wg.wait").entered();
+                    wg.wait();
+                }
+                let mut cache_guard = self.cache.lock().map_err(map_poisoned)?;
+                if let Some(cached) = cache_guard.lru_cache.get(&request) {
+                    return Ok(cached.clone());
+                }
+            } else {
+                drop(cache_guard);
+            }
         }
+        #[cfg(not(feature = "threading"))]
+        let _ = max_groups;
+
         // No threads are running, fallback to single-threaded loader
         let result = {
             let mut loader = self.loader.lock().map_err(map_poisoned)?;

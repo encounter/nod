@@ -45,30 +45,31 @@ pub struct ProcessOptions {
     /// If the output format supports multithreaded processing, this sets the number of threads to
     /// use for processing data. This is particularly useful for formats that compress data or
     /// perform other transformations. The default value of 0 disables multithreading.
+    #[cfg(feature = "threading")]
     pub processor_threads: usize,
     /// Enables CRC32 checksum calculation for the disc data.
     ///
     /// If the output format supports it, this will be stored in the disc data. (NKit 2 compatible)
-    /// Each digest calculation will run on a separate thread, unaffected by the processor thread
-    /// count.
+    /// If the "threading" feature is enabled, each digest calculation will run on a separate thread,
+    /// unaffected by the processor thread count.
     pub digest_crc32: bool,
     /// Enables MD5 checksum calculation for the disc data. (Slow!)
     ///
     /// If the output format supports it, this will be stored in the disc data. (NKit 2 compatible)
-    /// Each digest calculation will run on a separate thread, unaffected by the processor thread
-    /// count.
+    /// If the "threading" feature is enabled, each digest calculation will run on a separate thread,
+    /// unaffected by the processor thread count.
     pub digest_md5: bool,
     /// Enables SHA-1 checksum calculation for the disc data.
     ///
     /// If the output format supports it, this will be stored in the disc data. (NKit 2 compatible)
-    /// Each digest calculation will run on a separate thread, unaffected by the processor thread
-    /// count.
+    /// If the "threading" feature is enabled, each digest calculation will run on a separate thread,
+    /// unaffected by the processor thread count.
     pub digest_sha1: bool,
     /// Enables XXH64 checksum calculation for the disc data.
     ///
     /// If the output format supports it, this will be stored in the disc data. (NKit 2 compatible)
-    /// Each digest calculation will run on a separate thread, unaffected by the processor thread
-    /// count.
+    /// If the "threading" feature is enabled, each digest calculation will run on a separate thread,
+    /// unaffected by the processor thread count.
     pub digest_xxh64: bool,
     /// The level of scrubbing to perform on the disc image.
     ///

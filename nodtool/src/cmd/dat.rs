@@ -160,8 +160,11 @@ struct DiscHashes {
 }
 
 fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
-    let options =
-        DiscOptions { partition_encryption: PartitionEncryption::Original, preloader_threads: 4 };
+    let options = DiscOptions {
+        partition_encryption: PartitionEncryption::Original,
+        #[cfg(feature = "threading")]
+        preloader_threads: 4,
+    };
     let disc = DiscReader::new(path, &options)?;
     if !full_verify {
         let meta = disc.meta();
@@ -187,6 +190,7 @@ fn load_disc(path: &Path, name: &str, full_verify: bool) -> Result<DiscHashes> {
             Ok(())
         },
         &ProcessOptions {
+            #[cfg(feature = "threading")]
             processor_threads: 12, // TODO
             digest_crc32: true,
             digest_md5: false,

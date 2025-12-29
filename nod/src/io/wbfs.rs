@@ -325,6 +325,7 @@ impl DiscWriter for DiscWriterWBFS {
                 scrub_update_partition: options.scrub == ScrubLevel::UpdatePartition,
             },
             self.block_count as u32,
+            #[cfg(feature = "threading")]
             options.processor_threads,
             |block| -> Result<()> {
                 // Update hashers

@@ -53,8 +53,11 @@ pub fn run(args: Args) -> nod::Result<()> {
     } else {
         output_dir = args.file.with_extension("");
     }
-    let disc =
-        DiscReader::new(&args.file, &DiscOptions { preloader_threads: 4, ..Default::default() })?;
+    let disc = DiscReader::new(&args.file, &DiscOptions {
+        #[cfg(feature = "threading")]
+        preloader_threads: 4,
+        ..Default::default()
+    })?;
     let header = disc.header();
     let is_wii = header.is_wii();
     let options = PartitionOptions { validate_hashes: args.validate };

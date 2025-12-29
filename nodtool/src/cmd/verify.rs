@@ -34,7 +34,6 @@ pub fn run(args: Args) -> nod::Result<()> {
         println!("Loading dat files...");
         redump::load_dats(args.dat.iter().map(PathBuf::as_ref))?;
     }
-    let cpus = num_cpus::get();
     let options = DiscOptions {
         partition_encryption: match (args.decrypt, args.encrypt) {
             (true, false) => PartitionEncryption::ForceDecrypted,
@@ -46,7 +45,8 @@ pub fn run(args: Args) -> nod::Result<()> {
                 ));
             }
         },
-        preloader_threads: 4.min(cpus),
+        #[cfg(feature = "threading")]
+        preloader_threads: 4.min(num_cpus::get()),
     };
     let format_options = FormatOptions::default();
     for file in &args.file {

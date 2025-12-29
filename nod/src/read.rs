@@ -52,6 +52,7 @@ pub struct DiscOptions {
     /// is particularly useful when reading the disc image sequentially, as it
     /// can perform decompression and rebuilding in parallel with the main
     /// read thread. The default value of 0 disables preloading.
+    #[cfg(feature = "threading")]
     pub preloader_threads: usize,
 }
 

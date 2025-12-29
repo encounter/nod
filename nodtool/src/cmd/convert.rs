@@ -52,6 +52,7 @@ pub fn run(args: Args) -> nod::Result<()> {
                 ));
             }
         },
+        #[cfg(feature = "threading")]
         preloader_threads: 4,
     };
     let format = match args.out.extension() {

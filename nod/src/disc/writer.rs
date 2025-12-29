@@ -1,5 +1,4 @@
 use std::{
-    collections::VecDeque,
     io,
     io::{BufRead, Read},
 };
@@ -8,7 +7,7 @@ use bytes::{Bytes, BytesMut};
 use dyn_clone::DynClone;
 
 use crate::{
-    Error, Result, ResultContext,
+    Result, ResultContext,
     common::{PartitionInfo, PartitionKind},
     disc::{
         SECTOR_SIZE,
@@ -97,41 +96,51 @@ pub fn read_block(reader: &mut DiscReader, block_size: usize) -> io::Result<(Byt
 }
 
 /// Process blocks in parallel, ensuring that they are written in order.
+#[cfg_attr(not(feature = "threading"), inline)]
 pub(crate) fn par_process<P, T>(
     mut processor: P,
     block_count: u32,
-    num_threads: usize,
+    #[cfg(feature = "threading")] num_threads: usize,
     mut callback: impl FnMut(BlockResult<T>) -> Result<()>,
 ) -> Result<()>
 where
     T: Send,
     P: BlockProcessor<BlockMeta = T>,
 {
-    if num_threads == 0 {
-        // Fall back to single-threaded processing
-        for block_idx in 0..block_count {
-            let block = processor
-                .process_block(block_idx)
-                .with_context(|| format!("Failed to process block {block_idx}"))?;
-            callback(block)?;
-        }
-        return Ok(());
-    }
+    #[cfg(feature = "threading")]
+    if num_threads > 0 {
+        return std::thread::scope(|s| {
+            use std::collections::VecDeque;
 
-    std::thread::scope(|s| {
-        let (block_tx, block_rx) = crossbeam_channel::bounded(block_count as usize);
-        for block_idx in 0..block_count {
-            block_tx.send(block_idx).unwrap();
-        }
-        drop(block_tx); // Disconnect channel
+            use crate::Error;
 
-        let (result_tx, result_rx) = crossbeam_channel::bounded(0);
+            let (block_tx, block_rx) = crossbeam_channel::bounded(block_count as usize);
+            for block_idx in 0..block_count {
+                block_tx.send(block_idx).unwrap();
+            }
+            drop(block_tx); // Disconnect channel
 
-        // Spawn threads to process blocks
-        for _ in 0..num_threads - 1 {
-            let block_rx = block_rx.clone();
-            let result_tx = result_tx.clone();
-            let mut processor = processor.clone();
+            let (result_tx, result_rx) = crossbeam_channel::bounded(0);
+
+            // Spawn threads to process blocks
+            for _ in 0..num_threads - 1 {
+                let block_rx = block_rx.clone();
+                let result_tx = result_tx.clone();
+                let mut processor = processor.clone();
+                s.spawn(move || {
+                    while let Ok(block_idx) = block_rx.recv() {
+                        let result = processor
+                            .process_block(block_idx)
+                            .with_context(|| format!("Failed to process block {block_idx}"));
+                        let failed = result.is_err(); // Stop processing if an error occurs
+                        if result_tx.send(result).is_err() || failed {
+                            break;
+                        }
+                    }
+                });
+            }
+
+            // Last iteration moves instead of cloning
             s.spawn(move || {
                 while let Ok(block_idx) = block_rx.recv() {
                     let result = processor
@@ -143,45 +152,41 @@ where
                     }
                 }
             });
-        }
 
-        // Last iteration moves instead of cloning
-        s.spawn(move || {
-            while let Ok(block_idx) = block_rx.recv() {
-                let result = processor
-                    .process_block(block_idx)
-                    .with_context(|| format!("Failed to process block {block_idx}"));
-                let failed = result.is_err(); // Stop processing if an error occurs
-                if result_tx.send(result).is_err() || failed {
-                    break;
-                }
-            }
-        });
-
-        // Main thread processes results
-        let mut current_block = 0;
-        let mut out_of_order = VecDeque::<BlockResult<T>>::new();
-        while let Ok(result) = result_rx.recv() {
-            let result = result?;
-            if result.block_idx == current_block {
-                callback(result)?;
-                current_block += 1;
-                // Check if any out of order blocks can be written
-                while out_of_order.front().is_some_and(|r| r.block_idx == current_block) {
-                    callback(out_of_order.pop_front().unwrap())?;
+            // Main thread processes results
+            let mut current_block = 0;
+            let mut out_of_order = VecDeque::<BlockResult<T>>::new();
+            while let Ok(result) = result_rx.recv() {
+                let result = result?;
+                if result.block_idx == current_block {
+                    callback(result)?;
                     current_block += 1;
-                }
-            } else {
-                // Insert sorted
-                match out_of_order.binary_search_by_key(&result.block_idx, |r| r.block_idx) {
-                    Ok(idx) => Err(Error::Other(format!("Unexpected duplicate block {idx}")))?,
-                    Err(idx) => out_of_order.insert(idx, result),
+                    // Check if any out of order blocks can be written
+                    while out_of_order.front().is_some_and(|r| r.block_idx == current_block) {
+                        callback(out_of_order.pop_front().unwrap())?;
+                        current_block += 1;
+                    }
+                } else {
+                    // Insert sorted
+                    match out_of_order.binary_search_by_key(&result.block_idx, |r| r.block_idx) {
+                        Ok(idx) => Err(Error::Other(format!("Unexpected duplicate block {idx}")))?,
+                        Err(idx) => out_of_order.insert(idx, result),
+                    }
                 }
             }
-        }
 
-        Ok(())
-    })
+            Ok(())
+        });
+    }
+
+    // Fall back to single-threaded processing
+    for block_idx in 0..block_count {
+        let block = processor
+            .process_block(block_idx)
+            .with_context(|| format!("Failed to process block {block_idx}"))?;
+        callback(block)?;
+    }
+    return Ok(());
 }
 
 /// The determined block type.

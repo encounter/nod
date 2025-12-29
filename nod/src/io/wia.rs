@@ -1729,6 +1729,7 @@ impl DiscWriter for DiscWriterWIA {
                 junk_info: self.junk_info.clone(),
             },
             self.group_count,
+            #[cfg(feature = "threading")]
             options.processor_threads,
             |group| -> Result<()> {
                 // Update hashers
