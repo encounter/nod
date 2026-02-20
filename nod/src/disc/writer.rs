@@ -186,7 +186,7 @@ where
             .with_context(|| format!("Failed to process block {block_idx}"))?;
         callback(block)?;
     }
-    return Ok(());
+    Ok(())
 }
 
 /// The determined block type.

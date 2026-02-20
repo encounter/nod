@@ -60,6 +60,7 @@ pub struct DiscOptions {
 #[derive(Default, Debug, Clone)]
 pub struct PartitionOptions {
     /// Wii: Validate data hashes while reading the partition, if available.
+    /// This significantly slows down reading.
     pub validate_hashes: bool,
 }
 

@@ -54,6 +54,23 @@ jobs:
       - name: Cargo fmt
         run: cargo fmt --all --check
 
+  cbindgen:
+    name: Check C header
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust workspace
+        uses: Swatinem/rust-cache@v2
+      - name: Install cbindgen
+        run: cargo install cbindgen
+      - name: Generate header
+        run: cbindgen --config nod-ffi/cbindgen.toml --crate nod-ffi --output /tmp/nod.h
+      - name: Check header is up to date
+        run: diff nod-ffi/include/nod.h /tmp/nod.h
+
   deny:
     name: Deny
     runs-on: ubuntu-latest

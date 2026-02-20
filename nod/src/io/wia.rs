@@ -31,7 +31,7 @@ use crate::{
         Align,
         aes::decrypt_sector_data_b2b,
         array_ref, array_ref_mut,
-        compress::{Compressor, DecompressionKind, Decompressor},
+        compress::{Compressor, DecompressionKind},
         digest::{DigestManager, sha1_hash, xxh64_hash},
         lfg::{LaggedFibonacci, SEED_SIZE, SEED_SIZE_BYTES},
         read::{
@@ -555,7 +555,7 @@ pub struct BlockReaderWIA {
     raw_data: Arc<[WIARawData]>,
     groups: Arc<[RVZGroup]>,
     nkit_header: Option<NKitHeader>,
-    decompressor: Decompressor,
+    decompressor: DecompressionKind,
 }
 
 impl Clone for BlockReaderWIA {
@@ -629,7 +629,7 @@ impl BlockReaderWIA {
         debug!("Partitions: {:?}", partitions);
 
         // Create decompressor
-        let mut decompressor = Decompressor::new(DecompressionKind::from_wia(&disc)?);
+        let decompressor = DecompressionKind::from_wia(&disc)?;
 
         // Load raw data headers
         let raw_data: Arc<[WIARawData]> = {
@@ -1904,13 +1904,11 @@ fn compr_data(compression: Compression) -> io::Result<Box<[u8]>> {
     match compression {
         #[cfg(feature = "compress-lzma")]
         Compression::Lzma(level) => {
-            let options = liblzma::stream::LzmaOptions::new_preset(level as u32)?;
-            Ok(Box::new(crate::util::compress::lzma_util::lzma_props_encode(&options)?))
+            Ok(Box::new(crate::util::compress::lzma_api::lzma_props_encode_preset(level as u32)?))
         }
         #[cfg(feature = "compress-lzma")]
         Compression::Lzma2(level) => {
-            let options = liblzma::stream::LzmaOptions::new_preset(level as u32)?;
-            Ok(Box::new(crate::util::compress::lzma_util::lzma2_props_encode(&options)?))
+            Ok(Box::new(crate::util::compress::lzma_api::lzma2_props_encode_preset(level as u32)?))
         }
         _ => Ok(Box::default()),
     }
@@ -1932,7 +1930,7 @@ fn compress_bound(compression: Compression, size: usize) -> usize {
             size.div_ceil(1000) + size + 1000
         }
         #[cfg(feature = "compress-zstd")]
-        Compression::Zstandard(_) => zstd_safe::compress_bound(size),
+        Compression::Zstandard(_) => crate::util::compress::zstd_api::compress_bound(size),
         _ => unimplemented!("CompressionKind::compress_bound {:?}", compression),
     }
 }

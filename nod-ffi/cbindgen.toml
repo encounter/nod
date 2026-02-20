@@ -1,0 +1,30 @@
+cpp_compat = true
+include_guard = "NOD_H"
+language = "C"
+no_includes = true
+style = "both"
+sys_includes = ["stdbool.h", "stddef.h", "stdint.h"]
+usize_is_size_t = true
+after_includes = """
+/**
+ * Wii disc magic bytes at offset 0x18.
+ */
+#define WII_MAGIC ((const uint8_t[4]){0x5D, 0x1C, 0x9E, 0xA3})
+
+/**
+ * GameCube disc magic bytes at offset 0x1C.
+ */
+#define GCN_MAGIC ((const uint8_t[4]){0xC2, 0x33, 0x9F, 0x3D})
+
+/**
+ * Compares two 4-byte magic values.
+ */
+#define NOD_MAGIC_EQ(lhs, rhs) \
+  ((lhs)[0] == (rhs)[0] && (lhs)[1] == (rhs)[1] && (lhs)[2] == (rhs)[2] && (lhs)[3] == (rhs)[3])
+"""
+
+[enum]
+rename_variants = "QualifiedScreamingSnakeCase"
+
+[parse]
+parse_deps = false

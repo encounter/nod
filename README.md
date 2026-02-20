@@ -10,6 +10,8 @@
 
 Library for reading and writing Nintendo Optical Disc (GameCube and Wii) images.
 
+Primarily a Rust crate with a [C API](#c-api) for integration with C and C++ projects.
+
 Originally based on the C++ library [nod](https://github.com/AxioDL/nod),
 but with extended format support and many additional features.
 
@@ -204,6 +206,51 @@ output_file.flush().expect("Failed to flush output file");
 // Display the calculated digests.
 println!("CRC32: {:08X}", finalization.crc32.unwrap());
 // ...
+```
+
+## C API
+
+This repository also provides a [C API](nod-ffi/include/nod.h) for interfacing with other languages.
+
+For a full end-to-end example of using the C API, see [SDL3 IOStream Demo](nod-ffi/examples/sdl3-stream-demo/README.md).
+
+### Integration with CMake
+
+The top-level `CMakeLists.txt` builds the Rust library via [Corrosion](https://github.com/corrosion-rs/corrosion) and exports the target `nod::nod`.
+
+Features can be toggled with CMake options:
+
+- `NOD_COMPRESS_BZIP2` (default `ON`)
+- `NOD_COMPRESS_LZMA` (default `ON`)
+- `NOD_COMPRESS_ZLIB` (default `ON`)
+- `NOD_COMPRESS_ZSTD` (default `ON`)
+- `NOD_THREADING` (default `ON`)
+
+Example:
+
+```cmake
+cmake_minimum_required(VERSION 3.23)
+project(my_app C CXX)
+
+include(FetchContent)
+
+FetchContent_Declare(
+  nod
+  GIT_REPOSITORY https://github.com/encounter/nod.git
+  GIT_TAG [tag]
+)
+
+# Optional feature toggles
+set(NOD_COMPRESS_BZIP2 ON CACHE INTERNAL "Enable BZIP2 support")
+set(NOD_COMPRESS_LZMA ON CACHE INTERNAL "Enable LZMA/LZMA2 support")
+set(NOD_COMPRESS_ZLIB ON CACHE INTERNAL "Enable zlib/deflate support")
+set(NOD_COMPRESS_ZSTD ON CACHE INTERNAL "Enable Zstandard support")
+set(NOD_THREADING ON CACHE INTERNAL "Enable threaded processing support")
+
+FetchContent_MakeAvailable(nod)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE nod::nod)
 ```
 
 ## License

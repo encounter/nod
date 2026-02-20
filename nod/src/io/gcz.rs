@@ -20,7 +20,7 @@ use crate::{
     io::block::{Block, BlockKind, BlockReader, GCZ_MAGIC},
     read::{DiscMeta, DiscStream},
     util::{
-        compress::{Compressor, DecompressionKind, Decompressor},
+        compress::{Compressor, DecompressionKind},
         digest::DigestManager,
         read::{read_arc_slice_at, read_at},
         static_assert,
@@ -49,7 +49,6 @@ pub struct BlockReaderGCZ {
     block_hashes: Arc<[U32]>,
     block_buf: Box<[u8]>,
     data_offset: u64,
-    decompressor: Decompressor,
 }
 
 impl Clone for BlockReaderGCZ {
@@ -61,7 +60,6 @@ impl Clone for BlockReaderGCZ {
             block_hashes: self.block_hashes.clone(),
             block_buf: <[u8]>::new_box_zeroed_with_elems(self.block_buf.len()).unwrap(),
             data_offset: self.data_offset,
-            decompressor: self.decompressor.clone(),
         }
     }
 }
@@ -89,16 +87,7 @@ impl BlockReaderGCZ {
         // header + block_count * (u64 + u32)
         let data_offset = size_of::<GCZHeader>() as u64 + block_count as u64 * 12;
         let block_buf = <[u8]>::new_box_zeroed_with_elems(header.block_size.get() as usize)?;
-        let decompressor = Decompressor::new(DecompressionKind::Deflate);
-        Ok(Box::new(Self {
-            inner,
-            header,
-            block_map,
-            block_hashes,
-            block_buf,
-            data_offset,
-            decompressor,
-        }))
+        Ok(Box::new(Self { inner, header, block_map, block_hashes, block_buf, data_offset }))
     }
 }
 
@@ -164,7 +153,8 @@ impl BlockReader for BlockReaderGCZ {
 
         if compressed {
             // Decompress block
-            let out_len = self.decompressor.decompress(&self.block_buf[..compressed_size], out)?;
+            let out_len =
+                DecompressionKind::Deflate.decompress(&self.block_buf[..compressed_size], out)?;
             if out_len != block_size as usize {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,

@@ -1,5 +1,6 @@
 [workspace]
-members = ["nod", "nodtool"]
+members = ["nod", "nod-ffi", "nodtool"]
+default-members = ["nod", "nodtool"]
 resolver = "3"
 
 [profile.release]
@@ -12,7 +13,7 @@ strip = "debuginfo"
 codegen-units = 1
 
 [workspace.package]
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.5"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Luke Street <luke@street.dev>"]
