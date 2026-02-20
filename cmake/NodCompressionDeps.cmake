@@ -54,6 +54,13 @@ function(nod_resolve_corrosion_link_input out_var input_link rust_link_name)
                 endif()
             endforeach()
             if (_loc AND IS_ABSOLUTE "${_loc}")
+                # Derive OUTPUT_NAME from the actual filename to ensure
+                # the correct -l flag is passed on all platforms.
+                # (e.g. zlib.lib on MSVC vs libz.a on Unix)
+                get_filename_component(_stem "${_loc}" NAME_WE)
+                if (NOT MSVC AND _stem MATCHES "^lib(.+)$")
+                    set(_stem "${CMAKE_MATCH_1}")
+                endif()
                 set(_wrapper_target "nod_corrosion_link_${rust_link_name}")
                 if (NOT TARGET "${_wrapper_target}")
                     add_library("${_wrapper_target}" UNKNOWN IMPORTED GLOBAL)
@@ -62,7 +69,7 @@ function(nod_resolve_corrosion_link_input out_var input_link rust_link_name)
                     "${_wrapper_target}"
                     PROPERTIES
                         IMPORTED_LOCATION "${_loc}"
-                        OUTPUT_NAME "${rust_link_name}"
+                        OUTPUT_NAME "${_stem}"
                 )
                 set("${out_var}" "${_wrapper_target}" PARENT_SCOPE)
                 return()
