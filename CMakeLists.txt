@@ -8,7 +8,6 @@ option(NOD_COMPRESS_LZMA "Enable LZMA/LZMA2 support" ON)
 option(NOD_COMPRESS_ZLIB "Enable zlib/deflate support" ON)
 option(NOD_COMPRESS_ZSTD "Enable Zstandard support" ON)
 option(NOD_THREADING "Enable threaded processing support" ON)
-option(NOD_BUILD_STD "Rebuild Rust std library (required for tier 3 targets like tvOS)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(NodCompressionDeps)
@@ -42,22 +41,12 @@ set(NOD_IMPORT_ARGS NO_DEFAULT_FEATURES)
 if (NOD_FEATURES)
     list(APPEND NOD_IMPORT_ARGS FEATURES ${NOD_FEATURES})
 endif()
-if (NOD_BUILD_STD)
-    list(APPEND NOD_IMPORT_ARGS FLAGS -Zbuild-std)
-endif()
-# Embedded Apple platforms only support static libraries
-if (CMAKE_SYSTEM_NAME MATCHES "^(iOS|tvOS|watchOS|visionOS)$")
-    list(APPEND NOD_IMPORT_ARGS CRATE_TYPES staticlib)
-endif()
-
 # Import the nod-ffi crate using Corrosion.
 corrosion_import_crate(
     MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/nod-ffi/Cargo.toml"
     CRATES nod-ffi # NOTE: target becomes `nod_ffi`
     ${NOD_IMPORT_ARGS}
 )
-# Suppress #[link] attributes in the nod crate; CMake/Corrosion handles linking.
-corrosion_add_target_rustflags(nod_ffi "--cfg=nod_link_external")
 
 if (NOD_COMPRESS_BZIP2)
     nod_require_bzip2(_nod_bzip2_target)
