@@ -8,6 +8,7 @@ option(NOD_COMPRESS_LZMA "Enable LZMA/LZMA2 support" ON)
 option(NOD_COMPRESS_ZLIB "Enable zlib/deflate support" ON)
 option(NOD_COMPRESS_ZSTD "Enable Zstandard support" ON)
 option(NOD_THREADING "Enable threaded processing support" ON)
+option(NOD_BUILD_STD "Rebuild Rust std library (required for tier 3 targets like tvOS)" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(NodCompressionDeps)
@@ -40,6 +41,9 @@ endif()
 set(NOD_IMPORT_ARGS NO_DEFAULT_FEATURES)
 if (NOD_FEATURES)
     list(APPEND NOD_IMPORT_ARGS FEATURES ${NOD_FEATURES})
+endif()
+if (NOD_BUILD_STD)
+    list(APPEND NOD_IMPORT_ARGS FLAGS -Zbuild-std)
 endif()
 
 # Import the nod-ffi crate using Corrosion.
