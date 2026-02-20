@@ -36,7 +36,7 @@ indicatif = "0.18"
 md-5 = { workspace = true }
 nod = { version = "2.0.0-alpha", path = "../nod", default-features = false }
 num_cpus = { version = "1.17", optional = true }
-quick-xml = { version = "0.38", features = ["serialize"] }
+quick-xml = { version = "0.39", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 sha1 = { workspace = true }
 size = "0.5"
@@ -53,7 +53,7 @@ mimalloc = "0.1"
 
 [build-dependencies]
 hex = { version = "0.4", features = ["serde"] }
-quick-xml = { version = "0.38", features = ["serialize"] }
+quick-xml = { version = "0.39", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 zerocopy = { version = "0.8", features = ["alloc", "derive"] }
 zstd = "0.13"
