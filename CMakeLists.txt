@@ -45,6 +45,10 @@ endif()
 if (NOD_BUILD_STD)
     list(APPEND NOD_IMPORT_ARGS FLAGS -Zbuild-std)
 endif()
+# Embedded Apple platforms only support static libraries
+if (CMAKE_SYSTEM_NAME MATCHES "^(iOS|tvOS|watchOS|visionOS)$")
+    list(APPEND NOD_IMPORT_ARGS CRATE_TYPES staticlib)
+endif()
 
 # Import the nod-ffi crate using Corrosion.
 corrosion_import_crate(
