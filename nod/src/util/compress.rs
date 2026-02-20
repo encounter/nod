@@ -138,7 +138,7 @@ mod zlib_raw {
     pub const Z_OK: c_int = 0;
     pub const Z_BUF_ERROR: c_int = -5;
 
-    #[link(name = "z")]
+    #[cfg_attr(not(nod_link_external), link(name = "z"))]
     unsafe extern "C" {
         pub fn uncompress(
             dest: *mut u8,
@@ -246,12 +246,12 @@ mod bzip2_raw {
     macro_rules! abi_compat {
         ($(pub fn $name:ident($($arg:ident: $t:ty),*) -> $ret:ty,)*) => {
             #[cfg(windows)]
-            #[link(name = "bz2")]
+            #[cfg_attr(not(nod_link_external), link(name = "bz2"))]
             unsafe extern "system" {
                 $(pub fn $name($($arg: $t),*) -> $ret;)*
             }
             #[cfg(not(windows))]
-            #[link(name = "bz2")]
+            #[cfg_attr(not(nod_link_external), link(name = "bz2"))]
             unsafe extern "C" {
                 $(pub fn $name($($arg: $t),*) -> $ret;)*
             }
@@ -386,7 +386,7 @@ mod zstd_raw {
     pub const ZSTD_CONTENTSIZE_UNKNOWN: i32 = -1;
     pub const ZSTD_CONTENTSIZE_ERROR: i32 = -2;
 
-    #[link(name = "zstd")]
+    #[cfg_attr(not(nod_link_external), link(name = "zstd"))]
     unsafe extern "C" {
         pub fn ZSTD_compress(
             dst: *mut c_void,
@@ -551,7 +551,7 @@ mod lzma_raw {
 
     pub type lzma_allocator = c_void;
 
-    #[link(name = "lzma")]
+    #[cfg_attr(not(nod_link_external), link(name = "lzma"))]
     unsafe extern "C" {
         pub fn lzma_raw_buffer_encode(
             filters: *const lzma_filter,

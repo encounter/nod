@@ -56,6 +56,8 @@ corrosion_import_crate(
     CRATES nod-ffi # NOTE: target becomes `nod_ffi`
     ${NOD_IMPORT_ARGS}
 )
+# Suppress #[link] attributes in the nod crate; CMake/Corrosion handles linking.
+corrosion_add_target_rustflags(nod_ffi "--cfg=nod_link_external")
 
 if (NOD_COMPRESS_BZIP2)
     nod_require_bzip2(_nod_bzip2_target)
