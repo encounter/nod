@@ -139,7 +139,7 @@ mod zlib_raw {
     pub const Z_BUF_ERROR: c_int = -5;
 
     #[cfg_attr(not(target_env = "msvc"), link(name = "z"))]
-    #[cfg_attr(target_env = "msvc", link(name = "zlib"))]
+    #[cfg_attr(target_env = "msvc", link(name = "zlib", kind = "static"))]
     unsafe extern "C" {
         pub fn uncompress(
             dest: *mut u8,
@@ -246,7 +246,12 @@ mod bzip2_raw {
 
     macro_rules! abi_compat {
         ($(pub fn $name:ident($($arg:ident: $t:ty),*) -> $ret:ty,)*) => {
-            #[cfg(windows)]
+            #[cfg(all(windows, target_env = "msvc"))]
+            #[link(name = "bz2", kind = "static")]
+            unsafe extern "system" {
+                $(pub fn $name($($arg: $t),*) -> $ret;)*
+            }
+            #[cfg(all(windows, not(target_env = "msvc")))]
             #[link(name = "bz2")]
             unsafe extern "system" {
                 $(pub fn $name($($arg: $t),*) -> $ret;)*
@@ -387,7 +392,8 @@ mod zstd_raw {
     pub const ZSTD_CONTENTSIZE_UNKNOWN: i32 = -1;
     pub const ZSTD_CONTENTSIZE_ERROR: i32 = -2;
 
-    #[link(name = "zstd")]
+    #[cfg_attr(not(target_env = "msvc"), link(name = "zstd"))]
+    #[cfg_attr(target_env = "msvc", link(name = "zstd", kind = "static"))]
     unsafe extern "C" {
         pub fn ZSTD_compress(
             dst: *mut c_void,
@@ -552,7 +558,8 @@ mod lzma_raw {
 
     pub type lzma_allocator = c_void;
 
-    #[link(name = "lzma")]
+    #[cfg_attr(not(target_env = "msvc"), link(name = "lzma"))]
+    #[cfg_attr(target_env = "msvc", link(name = "lzma", kind = "static"))]
     unsafe extern "C" {
         pub fn lzma_raw_buffer_encode(
             filters: *const lzma_filter,
