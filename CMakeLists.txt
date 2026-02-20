@@ -41,6 +41,10 @@ set(NOD_IMPORT_ARGS NO_DEFAULT_FEATURES)
 if (NOD_FEATURES)
     list(APPEND NOD_IMPORT_ARGS FEATURES ${NOD_FEATURES})
 endif()
+# Embedded Apple platforms don't support dynamic libraries
+if (CMAKE_SYSTEM_NAME MATCHES "^(iOS|tvOS|watchOS|visionOS)$")
+    list(APPEND NOD_IMPORT_ARGS CRATE_TYPES staticlib)
+endif()
 # Import the nod-ffi crate using Corrosion.
 corrosion_import_crate(
     MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/nod-ffi/Cargo.toml"
