@@ -69,6 +69,70 @@ function(nod_resolve_corrosion_link_input out_var input_link rust_link_name)
     set("${out_var}" "${input_link}" PARENT_SCOPE)
 endfunction()
 
+function(nod_get_target_linker_dir out_var target_name)
+    set(_resolved "")
+    if (TARGET "${target_name}")
+        get_target_property(_imported "${target_name}" IMPORTED)
+        if (_imported)
+            foreach(_prop
+                IMPORTED_LOCATION
+                IMPORTED_LOCATION_RELEASE
+                IMPORTED_LOCATION_RELWITHDEBINFO
+                IMPORTED_LOCATION_MINSIZEREL
+                IMPORTED_LOCATION_DEBUG
+                IMPORTED_IMPLIB
+                IMPORTED_IMPLIB_RELEASE
+                IMPORTED_IMPLIB_RELWITHDEBINFO
+                IMPORTED_IMPLIB_MINSIZEREL
+                IMPORTED_IMPLIB_DEBUG
+                LOCATION
+            )
+                get_target_property(_loc "${target_name}" "${_prop}")
+                if (_loc AND IS_ABSOLUTE "${_loc}")
+                    get_filename_component(_resolved "${_loc}" DIRECTORY)
+                    break()
+                endif()
+            endforeach()
+        endif()
+
+        if (NOT _resolved)
+            get_target_property(_target_type "${target_name}" TYPE)
+            if (_target_type STREQUAL "STATIC_LIBRARY")
+                set(_dir_prop "ARCHIVE_OUTPUT_DIRECTORY")
+            elseif(_target_type STREQUAL "SHARED_LIBRARY" OR _target_type STREQUAL "MODULE_LIBRARY")
+                set(_dir_prop "LIBRARY_OUTPUT_DIRECTORY")
+            elseif(_target_type STREQUAL "EXECUTABLE")
+                set(_dir_prop "RUNTIME_OUTPUT_DIRECTORY")
+            else()
+                set(_dir_prop "")
+            endif()
+
+            if (_dir_prop)
+                if (CMAKE_BUILD_TYPE)
+                    string(TOUPPER "${CMAKE_BUILD_TYPE}" _cfg)
+                    get_target_property(_resolved "${target_name}" "${_dir_prop}_${_cfg}")
+                endif()
+                if (NOT _resolved)
+                    get_target_property(_resolved "${target_name}" "${_dir_prop}")
+                endif()
+            endif()
+
+            if (NOT _resolved)
+                get_target_property(_resolved "${target_name}" BINARY_DIR)
+            endif()
+
+            if (_resolved)
+                string(GENEX_STRIP "${_resolved}" _resolved_no_genex)
+                if (_resolved_no_genex)
+                    set(_resolved "${_resolved_no_genex}")
+                endif()
+            endif()
+        endif()
+    endif()
+
+    set("${out_var}" "${_resolved}" PARENT_SCOPE)
+endfunction()
+
 function(nod_require_bzip2 out_target)
     nod_first_available_target(_bzip2_target bz2_static BZip2::BZip2 bz2)
     if (_bzip2_target)
@@ -174,7 +238,9 @@ function(nod_require_zstd out_target)
     nod_first_available_target(
         _zstd_target
         zstd::libzstd_static
+        libzstd_static
         zstd::libzstd
+        libzstd
     )
     if (_zstd_target)
         message(STATUS "nod: Linking zstd target ${_zstd_target}")
@@ -187,7 +253,9 @@ function(nod_require_zstd out_target)
     nod_first_available_target(
         _zstd_target
         zstd::libzstd_static
+        libzstd_static
         zstd::libzstd
+        libzstd
     )
     if (_zstd_target)
         message(STATUS "nod: Linking zstd target ${_zstd_target}")
