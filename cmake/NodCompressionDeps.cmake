@@ -121,7 +121,7 @@ function(nod_require_liblzma out_target)
         return()
     endif()
 
-    message(STATUS "nod: Fetching vendored xz ${NOD_XZ_GIT_TAG}")
+    message(STATUS "nod: Fetching vendored lzma ${NOD_XZ_GIT_TAG}")
     set(XZ_NLS OFF CACHE INTERNAL "")
     set(XZ_DOC OFF CACHE INTERNAL "")
     set(XZ_DOXYGEN OFF CACHE INTERNAL "")
@@ -136,7 +136,7 @@ function(nod_require_liblzma out_target)
         GIT_TAG "${NOD_XZ_GIT_TAG}"
     )
     FetchContent_MakeAvailable(nod_xz)
-    set("${out_target}" liblzma::liblzma PARENT_SCOPE)
+    set("${out_target}" liblzma PARENT_SCOPE)
 endfunction()
 
 function(nod_require_zlib out_target)
