@@ -41,7 +41,9 @@ set(NOD_IMPORT_ARGS NO_DEFAULT_FEATURES)
 if (NOD_FEATURES)
     list(APPEND NOD_IMPORT_ARGS FEATURES ${NOD_FEATURES})
 endif()
-
+if (DEFINED BUILD_SHARED_LIBS AND NOT BUILD_SHARED_LIBS)
+    list(APPEND NOD_IMPORT_ARGS CRATE_TYPES staticlib)
+endif()
 # Import the nod-ffi crate using Corrosion.
 corrosion_import_crate(
     MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/nod-ffi/Cargo.toml"
@@ -52,37 +54,32 @@ corrosion_import_crate(
 if (NOD_COMPRESS_BZIP2)
     nod_require_bzip2(_nod_bzip2_target)
     target_link_libraries(nod_ffi INTERFACE "${_nod_bzip2_target}")
-    if (TARGET bz2_static)
-        corrosion_add_target_local_rustflags(
-            nod_ffi
-            "-L$<TARGET_LINKER_FILE_DIR:bz2_static>"
-            "-lstatic=bz2"
-        )
-        if (TARGET _cargo-build_nod_ffi)
-            add_dependencies(_cargo-build_nod_ffi bz2_static)
-        endif()
-    else()
-        nod_resolve_corrosion_link_input(_nod_bzip2_rust_link "${_nod_bzip2_target}" "bz2")
-        corrosion_link_libraries(nod_ffi "${_nod_bzip2_rust_link}")
-    endif()
+    nod_resolve_corrosion_link_input(_nod_bzip2_rust_link "${_nod_bzip2_target}" "bz2")
+    # Global flags are needed since the #[link] directives are in the `nod` dependency crate,
+    # not in nod-ffi itself.
+    corrosion_add_target_rustflags(nod_ffi "-L" "$<TARGET_LINKER_FILE_DIR:${_nod_bzip2_rust_link}>")
+    add_dependencies(_cargo-build_nod_ffi "${_nod_bzip2_rust_link}")
 endif()
 if (NOD_COMPRESS_LZMA)
     nod_require_liblzma(_nod_liblzma_target)
     target_link_libraries(nod_ffi INTERFACE "${_nod_liblzma_target}")
     nod_resolve_corrosion_link_input(_nod_liblzma_rust_link "${_nod_liblzma_target}" "lzma")
-    corrosion_link_libraries(nod_ffi "${_nod_liblzma_rust_link}")
+    corrosion_add_target_rustflags(nod_ffi "-L" "$<TARGET_LINKER_FILE_DIR:${_nod_liblzma_rust_link}>")
+    add_dependencies(_cargo-build_nod_ffi "${_nod_liblzma_rust_link}")
 endif()
 if (NOD_COMPRESS_ZLIB)
     nod_require_zlib(_nod_zlib_target)
     target_link_libraries(nod_ffi INTERFACE "${_nod_zlib_target}")
     nod_resolve_corrosion_link_input(_nod_zlib_rust_link "${_nod_zlib_target}" "z")
-    corrosion_link_libraries(nod_ffi "${_nod_zlib_rust_link}")
+    corrosion_add_target_rustflags(nod_ffi "-L" "$<TARGET_LINKER_FILE_DIR:${_nod_zlib_rust_link}>")
+    add_dependencies(_cargo-build_nod_ffi "${_nod_zlib_rust_link}")
 endif()
 if (NOD_COMPRESS_ZSTD)
     nod_require_zstd(_nod_zstd_target)
     target_link_libraries(nod_ffi INTERFACE "${_nod_zstd_target}")
     nod_resolve_corrosion_link_input(_nod_zstd_rust_link "${_nod_zstd_target}" "zstd")
-    corrosion_link_libraries(nod_ffi "${_nod_zstd_rust_link}")
+    corrosion_add_target_rustflags(nod_ffi "-L" "$<TARGET_LINKER_FILE_DIR:${_nod_zstd_rust_link}>")
+    add_dependencies(_cargo-build_nod_ffi "${_nod_zstd_rust_link}")
 endif()
 
 target_sources(nod_ffi INTERFACE
