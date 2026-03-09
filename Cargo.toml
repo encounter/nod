@@ -3,13 +3,9 @@ members = ["nod", "nod-ffi", "nodtool"]
 default-members = ["nod", "nodtool"]
 resolver = "3"
 
-[profile.release]
-debug = 1
-
 [profile.release-lto]
 inherits = "release"
 lto = "fat"
-strip = "debuginfo"
 codegen-units = 1
 
 [workspace.package]

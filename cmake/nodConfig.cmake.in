@@ -1,0 +1,76 @@
+@PACKAGE_INIT@
+
+set(_nod_libdir "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@")
+set(_nod_incdir "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@")
+
+if (NOT TARGET nod::nod_shared AND NOT TARGET nod::nod_static)
+    # Shared library
+    if (WIN32)
+        set(_nod_dll "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}")
+        set(_nod_implib "${_nod_libdir}/${CMAKE_IMPORT_LIBRARY_PREFIX}nod${CMAKE_IMPORT_LIBRARY_SUFFIX}")
+        if (EXISTS "${_nod_dll}")
+            add_library(nod::nod_shared SHARED IMPORTED)
+            set_target_properties(nod::nod_shared PROPERTIES
+                IMPORTED_LOCATION "${_nod_dll}"
+                INTERFACE_INCLUDE_DIRECTORIES "${_nod_incdir}"
+            )
+            if (EXISTS "${_nod_implib}")
+                set_target_properties(nod::nod_shared PROPERTIES
+                    IMPORTED_IMPLIB "${_nod_implib}"
+                )
+            endif()
+        endif()
+    else()
+        set(_nod_shared "${_nod_libdir}/${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}")
+        if (EXISTS "${_nod_shared}")
+            add_library(nod::nod_shared SHARED IMPORTED)
+            set_target_properties(nod::nod_shared PROPERTIES
+                IMPORTED_LOCATION "${_nod_shared}"
+                INTERFACE_INCLUDE_DIRECTORIES "${_nod_incdir}"
+            )
+        endif()
+    endif()
+
+    # Static library
+    if (MSVC)
+        set(_nod_static "${_nod_libdir}/nod_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    else()
+        set(_nod_static "${_nod_libdir}/${CMAKE_STATIC_LIBRARY_PREFIX}nod${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    endif()
+    if (EXISTS "${_nod_static}")
+        add_library(nod::nod_static STATIC IMPORTED)
+        set_target_properties(nod::nod_static PROPERTIES
+            IMPORTED_LOCATION "${_nod_static}"
+            INTERFACE_INCLUDE_DIRECTORIES "${_nod_incdir}"
+        )
+    endif()
+
+    # Default nod::nod target (respects BUILD_SHARED_LIBS)
+    if (BUILD_SHARED_LIBS AND TARGET nod::nod_shared)
+        add_library(nod::nod INTERFACE IMPORTED)
+        set_target_properties(nod::nod PROPERTIES
+            INTERFACE_LINK_LIBRARIES nod::nod_shared
+        )
+    elseif (TARGET nod::nod_static)
+        add_library(nod::nod INTERFACE IMPORTED)
+        set_target_properties(nod::nod PROPERTIES
+            INTERFACE_LINK_LIBRARIES nod::nod_static
+        )
+    elseif (TARGET nod::nod_shared)
+        add_library(nod::nod INTERFACE IMPORTED)
+        set_target_properties(nod::nod PROPERTIES
+            INTERFACE_LINK_LIBRARIES nod::nod_shared
+        )
+    else()
+        set(nod_FOUND FALSE)
+        if (nod_FIND_REQUIRED)
+            message(FATAL_ERROR "nod library not found in ${_nod_libdir}")
+        endif()
+        return()
+    endif()
+endif()
+
+unset(_nod_libdir)
+unset(_nod_incdir)
+
+check_required_components(nod)
