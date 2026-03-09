@@ -1,0 +1,52 @@
+@PACKAGE_INIT@
+
+if (NOT TARGET nod::nod)
+    # Find the installed library
+    find_library(_nod_shared_lib
+        NAMES nod
+        PATHS "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@"
+        NO_DEFAULT_PATH
+    )
+    find_library(_nod_static_lib
+        NAMES nod
+        PATHS "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@"
+        NO_DEFAULT_PATH
+    )
+
+    if (_nod_shared_lib)
+        add_library(nod::nod SHARED IMPORTED)
+        set_target_properties(nod::nod PROPERTIES
+            IMPORTED_LOCATION "${_nod_shared_lib}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
+        )
+        # On Windows, set IMPORTED_IMPLIB for the import library
+        if (WIN32)
+            find_file(_nod_implib
+                NAMES nod.lib nod.dll.a
+                PATHS "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@"
+                NO_DEFAULT_PATH
+            )
+            if (_nod_implib)
+                set_target_properties(nod::nod PROPERTIES IMPORTED_IMPLIB "${_nod_implib}")
+            endif ()
+            unset(_nod_implib CACHE)
+        endif ()
+    elseif (_nod_static_lib)
+        add_library(nod::nod STATIC IMPORTED)
+        set_target_properties(nod::nod PROPERTIES
+            IMPORTED_LOCATION "${_nod_static_lib}"
+            INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@"
+        )
+    else ()
+        set(nod_FOUND FALSE)
+        if (nod_FIND_REQUIRED)
+            message(FATAL_ERROR "nod library not found in ${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@")
+        endif ()
+        return()
+    endif ()
+
+    unset(_nod_shared_lib CACHE)
+    unset(_nod_static_lib CACHE)
+endif ()
+
+check_required_components(nod)
