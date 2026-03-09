@@ -208,6 +208,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        if: startsWith(matrix.platform, 'windows-')
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build

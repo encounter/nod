@@ -141,7 +141,7 @@ target_sources(nod_ffi INTERFACE
 # Create a namespace alias for the library target.
 add_library(nod::nod ALIAS nod_ffi)
 
-# ── Install ──
+# Install
 include(GNUInstallDirs)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     set(_NOD_INSTALL_DEFAULT ON)
@@ -153,15 +153,39 @@ option(NOD_ENABLE_INSTALL "Generate install targets" ${_NOD_INSTALL_DEFAULT})
 if (NOD_ENABLE_INSTALL)
     # Corrosion's install doesn't generate proper IMPORTED targets for consumers,
     # so we install the library files directly and generate our own CMake config.
-    # Rename from nod_ffi to nod.
-    install(FILES "$<TARGET_FILE:nod_ffi-shared>"
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        RENAME "$<PATH:REPLACE_FILENAME,$<TARGET_FILE_NAME:nod_ffi-shared>,${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}>"
-    )
+
+    # Shared library
+    if (WIN32)
+        # DLL to bin/
+        install(FILES "$<TARGET_FILE:nod_ffi-shared>"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}"
+            RENAME "${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+        # Import library to lib/
+        install(FILES "$<TARGET_LINKER_FILE:nod_ffi-shared>"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            RENAME "${CMAKE_IMPORT_LIBRARY_PREFIX}nod${CMAKE_IMPORT_LIBRARY_SUFFIX}"
+        )
+    else()
+        install(FILES "$<TARGET_FILE:nod_ffi-shared>"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+            RENAME "${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}"
+        )
+    endif()
+
+    # Static library
+    if (MSVC)
+        # On MSVC, use nod_static to avoid collision with the DLL import library
+        set(_nod_static_name "nod_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    else()
+        set(_nod_static_name "${CMAKE_STATIC_LIBRARY_PREFIX}nod${CMAKE_STATIC_LIBRARY_SUFFIX}")
+    endif()
     install(FILES "$<TARGET_FILE:nod_ffi-static>"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        RENAME "$<PATH:REPLACE_FILENAME,$<TARGET_FILE_NAME:nod_ffi-static>,${CMAKE_STATIC_LIBRARY_PREFIX}nod${CMAKE_STATIC_LIBRARY_SUFFIX}>"
+        RENAME "${_nod_static_name}"
     )
+
+    # Header
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/nod-ffi/include/nod.h"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     )
