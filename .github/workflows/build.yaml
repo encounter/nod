@@ -73,6 +73,8 @@ jobs:
   deny:
     name: Deny
     runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: "" # sccache breaks cargo-deny
     strategy:
       matrix:
         checks:
