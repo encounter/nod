@@ -222,8 +222,8 @@ function(nod_require_zlib out_target)
 
     message(STATUS "nod: Fetching vendored zlib ${NOD_ZLIB_GIT_TAG}")
     set(ZLIB_BUILD_TESTING OFF CACHE INTERNAL "")
-    set(ZLIB_BUILD_SHARED OFF CACHE INTERNAL)
-    set(ZLIB_BUILD_STATIC ON CACHE INTERNAL)
+    set(ZLIB_BUILD_SHARED OFF CACHE INTERNAL "")
+    set(ZLIB_BUILD_STATIC ON CACHE INTERNAL "")
     set(ZLIB_INSTALL OFF CACHE INTERNAL "")
     FetchContent_Declare(
         nod_zlib
