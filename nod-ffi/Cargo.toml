@@ -12,6 +12,7 @@ C API for reading GameCube and Wii disc images.
 keywords.workspace = true
 
 [lib]
+name = "nod"
 crate-type = ["cdylib", "staticlib"]
 
 [features]

@@ -30,7 +30,7 @@ set(NOD_FEATURES)
 if (NOD_USE_CMAKE_COMPRESSION)
     # CMake-provided compression: use base features (raw #[link] FFI).
     # NodCompressionDeps.cmake handles finding/building the C libraries
-    # and linking them to the nod_ffi target.
+    # and linking them to the nod target.
     if (NOD_COMPRESS_BZIP2)
         list(APPEND NOD_FEATURES compress-bzip2)
     endif()
@@ -73,7 +73,7 @@ endif()
 # Import the nod-ffi crate using Corrosion.
 corrosion_import_crate(
     MANIFEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/nod-ffi/Cargo.toml"
-    CRATES nod-ffi # NOTE: target becomes `nod_ffi`
+    CRATES nod-ffi # NOTE: target becomes `nod`
     ${NOD_IMPORT_ARGS}
 )
 
@@ -84,62 +84,62 @@ if (NOD_USE_CMAKE_COMPRESSION)
 
     if (NOD_COMPRESS_BZIP2)
         nod_require_bzip2(_nod_bzip2_target)
-        target_link_libraries(nod_ffi INTERFACE "${_nod_bzip2_target}")
+        target_link_libraries(nod INTERFACE "${_nod_bzip2_target}")
         nod_resolve_corrosion_link_input(_nod_bzip2_rust_link "${_nod_bzip2_target}" "bz2")
         nod_get_target_linker_dir(_nod_bzip2_linker_dir "${_nod_bzip2_rust_link}")
         if (_nod_bzip2_linker_dir)
-            corrosion_add_target_rustflags(nod_ffi "-L" "${_nod_bzip2_linker_dir}")
+            corrosion_add_target_rustflags(nod "-L" "${_nod_bzip2_linker_dir}")
         else()
-            corrosion_link_libraries(nod_ffi "${_nod_bzip2_rust_link}")
+            corrosion_link_libraries(nod "${_nod_bzip2_rust_link}")
         endif()
-        add_dependencies(_cargo-build_nod_ffi "${_nod_bzip2_rust_link}")
+        add_dependencies(_cargo-build_nod "${_nod_bzip2_rust_link}")
     endif()
     if (NOD_COMPRESS_LZMA)
         nod_require_liblzma(_nod_liblzma_target)
-        target_link_libraries(nod_ffi INTERFACE "${_nod_liblzma_target}")
+        target_link_libraries(nod INTERFACE "${_nod_liblzma_target}")
         nod_resolve_corrosion_link_input(_nod_liblzma_rust_link "${_nod_liblzma_target}" "lzma")
         nod_get_target_linker_dir(_nod_liblzma_linker_dir "${_nod_liblzma_rust_link}")
         if (_nod_liblzma_linker_dir)
-            corrosion_add_target_rustflags(nod_ffi "-L" "${_nod_liblzma_linker_dir}")
+            corrosion_add_target_rustflags(nod "-L" "${_nod_liblzma_linker_dir}")
         else()
-            corrosion_link_libraries(nod_ffi "${_nod_liblzma_rust_link}")
+            corrosion_link_libraries(nod "${_nod_liblzma_rust_link}")
         endif()
-        add_dependencies(_cargo-build_nod_ffi "${_nod_liblzma_rust_link}")
+        add_dependencies(_cargo-build_nod "${_nod_liblzma_rust_link}")
     endif()
     if (NOD_COMPRESS_ZLIB)
         nod_require_zlib(_nod_zlib_target)
-        target_link_libraries(nod_ffi INTERFACE "${_nod_zlib_target}")
+        target_link_libraries(nod INTERFACE "${_nod_zlib_target}")
         nod_resolve_corrosion_link_input(_nod_zlib_rust_link "${_nod_zlib_target}" "z")
         nod_get_target_linker_dir(_nod_zlib_linker_dir "${_nod_zlib_rust_link}")
         if (_nod_zlib_linker_dir)
-            corrosion_add_target_rustflags(nod_ffi "-L" "${_nod_zlib_linker_dir}")
+            corrosion_add_target_rustflags(nod "-L" "${_nod_zlib_linker_dir}")
         else()
-            corrosion_link_libraries(nod_ffi "${_nod_zlib_rust_link}")
+            corrosion_link_libraries(nod "${_nod_zlib_rust_link}")
         endif()
-        add_dependencies(_cargo-build_nod_ffi "${_nod_zlib_rust_link}")
+        add_dependencies(_cargo-build_nod "${_nod_zlib_rust_link}")
     endif()
     if (NOD_COMPRESS_ZSTD)
         nod_require_zstd(_nod_zstd_target)
-        target_link_libraries(nod_ffi INTERFACE "${_nod_zstd_target}")
+        target_link_libraries(nod INTERFACE "${_nod_zstd_target}")
         nod_resolve_corrosion_link_input(_nod_zstd_rust_link "${_nod_zstd_target}" "zstd")
         nod_get_target_linker_dir(_nod_zstd_linker_dir "${_nod_zstd_rust_link}")
         if (_nod_zstd_linker_dir)
-            corrosion_add_target_rustflags(nod_ffi "-L" "${_nod_zstd_linker_dir}")
+            corrosion_add_target_rustflags(nod "-L" "${_nod_zstd_linker_dir}")
         else()
-            corrosion_link_libraries(nod_ffi "${_nod_zstd_rust_link}")
+            corrosion_link_libraries(nod "${_nod_zstd_rust_link}")
         endif()
-        add_dependencies(_cargo-build_nod_ffi "${_nod_zstd_rust_link}")
+        add_dependencies(_cargo-build_nod "${_nod_zstd_rust_link}")
     endif()
 endif()
 
-target_sources(nod_ffi INTERFACE
+target_sources(nod INTERFACE
     FILE_SET HEADERS
     BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/nod-ffi/include"
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/nod-ffi/include/nod.h"
 )
 
 # Create a namespace alias for the library target.
-add_library(nod::nod ALIAS nod_ffi)
+add_library(nod::nod ALIAS nod)
 
 # Install
 include(GNUInstallDirs)
@@ -155,20 +155,20 @@ if (NOD_ENABLE_INSTALL)
     # so we install the library files directly and generate our own CMake config.
 
     # Shared library
-    if (TARGET nod_ffi-shared)
+    if (TARGET nod-shared)
         if (WIN32)
             # DLL to bin/
-            install(FILES "$<TARGET_FILE:nod_ffi-shared>"
+            install(FILES "$<TARGET_FILE:nod-shared>"
                 DESTINATION "${CMAKE_INSTALL_BINDIR}"
                 RENAME "${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}"
             )
             # Import library to lib/
-            install(FILES "$<TARGET_LINKER_FILE:nod_ffi-shared>"
+            install(FILES "$<TARGET_LINKER_FILE:nod-shared>"
                 DESTINATION "${CMAKE_INSTALL_LIBDIR}"
                 RENAME "${CMAKE_IMPORT_LIBRARY_PREFIX}nod${CMAKE_IMPORT_LIBRARY_SUFFIX}"
             )
         else()
-            install(FILES "$<TARGET_FILE:nod_ffi-shared>"
+            install(FILES "$<TARGET_FILE:nod-shared>"
                 DESTINATION "${CMAKE_INSTALL_LIBDIR}"
                 RENAME "${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}"
             )
@@ -176,14 +176,14 @@ if (NOD_ENABLE_INSTALL)
     endif()
 
     # Static library
-    if (TARGET nod_ffi-static)
+    if (TARGET nod-static)
         if (MSVC)
             # On MSVC, use nod_static to avoid collision with the DLL import library
             set(_nod_static_name "nod_static${CMAKE_STATIC_LIBRARY_SUFFIX}")
         else()
             set(_nod_static_name "${CMAKE_STATIC_LIBRARY_PREFIX}nod${CMAKE_STATIC_LIBRARY_SUFFIX}")
         endif()
-        install(FILES "$<TARGET_FILE:nod_ffi-static>"
+        install(FILES "$<TARGET_FILE:nod-static>"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}"
             RENAME "${_nod_static_name}"
         )
