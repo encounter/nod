@@ -43,6 +43,11 @@ if (NOT TARGET nod::nod_shared AND NOT TARGET nod::nod_static)
             IMPORTED_LOCATION "${_nod_static}"
             INTERFACE_INCLUDE_DIRECTORIES "${_nod_incdir}"
         )
+        # Rust's std library requires these system libraries when linked statically
+        if (WIN32)
+            set_property(TARGET nod::nod_static APPEND PROPERTY
+                INTERFACE_LINK_LIBRARIES ntdll userenv ws2_32 dbghelp bcrypt)
+        endif()
     endif()
 
     # Default nod::nod target (respects BUILD_SHARED_LIBS)
