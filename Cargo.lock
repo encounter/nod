@@ -561,7 +561,7 @@ checksum = "cf5a574dadd7941adeaa71823ecba5e28331b8313fb2e1c6a5c7e5981ea53ad6"
 
 [[package]]
 name = "nod"
-version = "2.0.0-alpha.6"
+version = "2.0.0-alpha.7"
 dependencies = [
  "adler2",
  "aes",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "nod-ffi"
-version = "2.0.0-alpha.6"
+version = "2.0.0-alpha.7"
 dependencies = [
  "dyn-clone",
  "nod",
@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "nodtool"
-version = "2.0.0-alpha.6"
+version = "2.0.0-alpha.7"
 dependencies = [
  "argp",
  "crc32fast",
