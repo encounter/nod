@@ -50,7 +50,7 @@ pub fn run(args: Args) -> nod::Result<()> {
     };
     let format_options = FormatOptions::default();
     for file in &args.file {
-        convert_and_verify(file, None, args.md5, &options, &format_options)?;
+        convert_and_verify(file, None, args.md5, false, &options, &format_options)?;
         println!();
     }
     Ok(())
