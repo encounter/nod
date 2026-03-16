@@ -34,6 +34,9 @@ pub struct Args {
     #[argp(option, short = 'c')]
     /// compression format and level (e.g. "zstd:19")
     compress: Option<String>,
+    #[argp(switch, short = 's')]
+    /// performs scrubbing on the disc image
+    scrub: bool,
 }
 
 pub fn run(args: Args) -> nod::Result<()> {
@@ -85,5 +88,5 @@ pub fn run(args: Args) -> nod::Result<()> {
     compression.validate_level()?;
     let format_options =
         FormatOptions { format, compression, block_size: format.default_block_size() };
-    convert_and_verify(&args.file, Some(&args.out), args.md5, &options, &format_options)
+    convert_and_verify(&args.file, Some(&args.out), args.md5, args.scrub, &options, &format_options)
 }

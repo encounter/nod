@@ -46,6 +46,7 @@ pub fn convert_and_verify(
     in_file: &Path,
     out_file: Option<&Path>,
     md5: bool,
+    scrub: bool,
     options: &DiscOptions,
     format_options: &FormatOptions,
 ) -> Result<()> {
@@ -128,7 +129,10 @@ pub fn convert_and_verify(
             digest_md5: md5,
             digest_sha1: true,
             digest_xxh64: true,
-            scrub: ScrubLevel::None,
+            scrub: match scrub {
+                true => ScrubLevel::UpdatePartition,
+                false => ScrubLevel::None,
+            },
         },
     )?;
     pb.finish();
