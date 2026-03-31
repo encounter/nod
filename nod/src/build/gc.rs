@@ -11,8 +11,8 @@ use zerocopy::{FromZeros, IntoBytes};
 use crate::{
     Error, Result, ResultContext,
     disc::{
-        BI2_SIZE, BOOT_SIZE, BootHeader, DiscHeader, GCN_MAGIC, MINI_DVD_SIZE, SECTOR_SIZE,
-        WII_MAGIC,
+        BB2_OFFSET, BI2_SIZE, BOOT_SIZE, BootHeader, DiscHeader, GCN_MAGIC, MINI_DVD_SIZE,
+        SECTOR_SIZE, WII_MAGIC,
         fst::{Fst, FstBuilder},
     },
     read::{CloneableStream, DiscStream, NonCloneableStream},
@@ -409,7 +409,8 @@ impl GCPartitionLayout {
 
         let mut boot = <[u8]>::new_box_zeroed_with_elems(BOOT_SIZE)?;
         boot[..size_of::<DiscHeader>()].copy_from_slice(self.disc_header.as_bytes());
-        boot[size_of::<DiscHeader>()..].copy_from_slice(self.boot_header.as_bytes());
+        boot[BB2_OFFSET..BB2_OFFSET + size_of::<BootHeader>()]
+            .copy_from_slice(self.boot_header.as_bytes());
         write_info.push(WriteInfo {
             kind: WriteKind::Static(Arc::from(boot), "[BOOT]"),
             size: BOOT_SIZE as u64,
@@ -520,7 +521,7 @@ impl GCPartitionLayout {
         }
 
         // Insert junk data
-        let write_info = insert_junk_data(write_info, &self.boot_header);
+        let write_info = insert_junk_data(write_info, &self.boot_header, self.disc_header.is_wii());
 
         Ok(write_info)
     }
@@ -533,10 +534,11 @@ impl GCPartitionLayout {
 pub(crate) fn insert_junk_data(
     write_info: Vec<WriteInfo>,
     boot_header: &BootHeader,
+    is_wii: bool,
 ) -> Vec<WriteInfo> {
     let mut new_write_info = Vec::with_capacity(write_info.len());
 
-    let fst_end = boot_header.fst_offset(false) + boot_header.fst_size(false);
+    let fst_end = boot_header.fst_offset(is_wii) + boot_header.fst_size(is_wii);
     let file_gap = find_file_gap(&write_info, fst_end);
     let mut last_file_end = 0;
     for info in write_info {
@@ -578,6 +580,11 @@ pub(crate) fn insert_junk_data(
 impl GCPartitionWriter {
     fn new(write_info: Vec<WriteInfo>, disc_size: u64, disc_id: [u8; 4], disc_num: u8) -> Self {
         Self { write_info, disc_size, disc_id, disc_num }
+    }
+
+    pub(crate) fn into_gc_stream<Cb>(self, file_callback: Cb) -> GCPartitionStream<Cb> {
+        let Self { write_info, disc_size, disc_id, disc_num } = self;
+        GCPartitionStream::new(file_callback, Arc::from(write_info), disc_size, disc_id, disc_num)
     }
 
     pub fn write_to<W>(
@@ -768,6 +775,7 @@ where Cb: FileCallback
             total += read;
         }
 
+        self.pos = pos;
         Ok(total)
     }
 }
