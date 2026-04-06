@@ -36,6 +36,7 @@ compress-zstd-vendored = ["compress-zstd", "dep:zstd-sys"]
 compress-zstd-static = ["compress-zstd-vendored"]
 openssl = ["dep:openssl"]
 openssl-vendored = ["openssl", "openssl/vendored"]
+python = ["dep:pyo3", "compress-bzip2-vendored", "compress-lzma-vendored", "compress-zlib-vendored", "compress-zstd-vendored", "threading"]
 threading = ["dep:crossbeam-channel", "dep:crossbeam-utils"]
 
 [dependencies]
@@ -60,6 +61,7 @@ md-5 = { workspace = true }
 libz-sys = { version = "1.1", optional = true }
 openssl = { version = "0.10", optional = true }
 polonius-the-crab = "0.5"
+pyo3 = { version = "0.24", features = ["abi3-py310", "extension-module"], optional = true }
 sha1 = { workspace = true }
 simple_moving_average = "1.0"
 thiserror = "2.0"

@@ -153,9 +153,20 @@ pub(crate) mod build;
 pub mod common;
 pub mod disc;
 pub(crate) mod io;
+#[cfg(feature = "python")]
+mod python;
 pub mod read;
 pub mod util;
 pub mod write;
+
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+
+#[cfg(feature = "python")]
+#[pymodule]
+fn nod(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    python::register(m)
+}
 
 /// Error types for nod.
 #[derive(thiserror::Error, Debug)]

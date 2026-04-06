@@ -1,0 +1,76 @@
+[build-system]
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "nod"
+description = "Python bindings for the nod GameCube/Wii disc image library"
+authors = [
+    { name = "Luke Street", email = "luke@street.dev" },
+]
+license = "MIT OR Apache-2.0"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Rust",
+]
+requires-python = ">=3.10"
+dependencies = []
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/encounter/nod"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.9",
+    "ty>=0.0.29",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["python_tests"]
+
+[tool.maturin]
+features = ["python"]
+python-versions = ">=3.10"
+
+
+[tool.ruff.lint]
+extend-select = [
+    "E", # PyCodeStyle Errors
+    "F", # Pyflakes (Errors/Warnings)
+    "W", # PyCodeStyle Warnings
+    "I", # Import Sorting (isort)
+    "UP", # Python Upgrades (pyupgrade)
+    "C4", # Comprehensions (flake8-comprehensions)
+    "C90", # complexity (mccabe)
+    "RSE", # flake8-raise (RSE)
+    "PTH", # use pathlib
+    "COM818", "COM819", # trailing comma
+    "ISC", # flake8-implicit-str-concat
+    "PIE", # flake8-pie (misc checks)
+    "PT", # common style issues or inconsistencies with pytest-based tests (flake8-pytest-style)
+    "SIM101", # Multiple isinstance calls for {name}, merge into a single call
+    "RUF",  # Ruff-specific rules
+
+    "PLC",  # pylint convention
+    "PLC0208",  # iterating over set is also not deterministic, so we shouldn't do that!
+    "PLE",  # pylint error
+    "PLW",  # pylint warning
+
+    # pylint refactor
+    "PLR0402", # Use from {module} import {name} in lieu of alias
+    "PLR1711", # Useless return statement at end of function
+    "PLR1722", # Use sys.exit() instead of {name}
+    "PLR0206", # Cannot have defined parameters for properties
+    "PLR0133", # Two constants compared in a comparison, consider replacing {left_constant} {op} {right_constant}
+    "PLR0124", # Name compared with itself, consider replacing {actual}
+]
+ignore = [
+    "ISC001",  # may cause conflicts with formatter
+    "PLW0603",  # we use some globals here and there
+    "PLW2901",  # TODO: should actually fix these
+    "PLC0415",  # we explicitly use the import within a function to postpone the loading of a module
+
+]
