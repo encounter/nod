@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 class DiscHeader:
     """Primary disc header (boot.bin offset 0x000)."""
 
@@ -135,7 +137,7 @@ class PartitionReader:
     def read_file(self, node: FstNode) -> bytes:
         """Read the full contents of a file identified by *node*.
 
-        Raises :exc:`OSError` if *node* is a directory.
+        Raises :exc:`IsADirectoryError` if *node* is a directory.
         """
 
     def __repr__(self) -> str: ...
@@ -143,7 +145,7 @@ class PartitionReader:
 class DiscReader:
     """Reader for a GameCube or Wii disc image.
 
-    Construct with :func:`open`.
+    Construct with :func:`open_disc`.
     """
 
     def header(self) -> DiscHeader:
@@ -180,18 +182,107 @@ class DiscReader:
 
     def __repr__(self) -> str: ...
 
-def open(path: str) -> DiscReader:
-    """Open a disc image from *path*.
+class DiscFinalization:
+    """Checksums and header data produced after :meth:`DiscWriter.process` completes."""
+
+    crc32: int | None
+    """CRC-32 checksum of the input disc data, if requested."""
+    xxh64: int | None
+    """XXH64 checksum of the input disc data, if requested."""
+
+    @property
+    def md5(self) -> bytes | None:
+        """MD5 hash of the input disc data (16 bytes), or ``None`` if not requested."""
+
+    @property
+    def sha1(self) -> bytes | None:
+        """
+        SHA-1 hash of the input disc data (20 bytes), or ``None`` if not requested.
+        """
+
+    @property
+    def header(self) -> bytes:
+        """
+        Header bytes that were written to the start of the output file (may be empty).
+        """
+
+    def __repr__(self) -> str: ...
+
+class DiscWriter:
+    """Writer for converting a disc image to a different format.
+
+    Construct by passing a :class:`DiscReader` and target format::
+
+        disc = nod.open_disc("game.rvz")
+        writer = nod.DiscWriter(disc, "ISO")
+        fin = writer.process("output.iso", digest_crc32=True)
+        print(f"CRC32: {fin.crc32:#010x}")
+    """
+
+    def __init__(
+        self,
+        disc: DiscReader,
+        format: str,
+        compression: str | None = None,
+        block_size: int = 0,
+    ) -> None:
+        """Create a writer targeting *format*.
+
+        *format* is one of ``"ISO"``, ``"CISO"``, ``"GCZ"``, ``"RVZ"``,
+        ``"WBFS"``, ``"WIA"``, ``"TGC"``.
+
+        *compression* follows the pattern ``"Algorithm"`` or ``"Algorithm:level"``,
+        e.g. ``"Zstandard:19"``, ``"Lzma2:6"``, ``"None"``.
+        Defaults to the recommended compression for *format*.
+
+        *block_size* defaults to the recommended block size for *format*
+        (``0`` = use default).
+        """
+
+    def progress_bound(self) -> int:
+        """
+        Upper bound for the *progress* value passed to the :meth:`process` callback.
+        """
+
+    def process(
+        self,
+        output_path: str,
+        *,
+        callback: Callable[[int, int], None] | None = None,
+        digest_crc32: bool = False,
+        digest_md5: bool = False,
+        digest_sha1: bool = False,
+        digest_xxh64: bool = False,
+        scrub_update_partition: bool = False,
+    ) -> DiscFinalization:
+        """Convert and write the disc image to *output_path*.
+
+        *callback*, if provided, is called as ``callback(progress, total)`` after
+        processing completes and can be used to display a final progress update.
+
+        Set ``digest_*`` flags to compute and return the corresponding checksums.
+
+        Set *scrub_update_partition* to replace the Wii update partition with zeroes
+        (supported for WBFS and CISO only).
+
+        Raises :exc:`OSError` if the output file cannot be created or written.
+        """
+
+    def __repr__(self) -> str: ...
+
+def open_disc(path: str) -> DiscReader:
+    """Open a disc image for reading from *path*.
 
     Supports ISO, CISO, GCZ, NFS, RVZ, WBFS, WIA, and TGC formats.
 
+    Raises :exc:`FileNotFoundError` if the file does not exist.
     Raises :exc:`OSError` if the file cannot be opened or the format is not recognised.
 
     Example::
 
         import nod
 
-        disc = nod.open("game.iso")
+        disc = nod.open_disc("game.iso")
         partition = disc.open_partition_kind("Data")
         meta = partition.meta()
         fst = meta.fst()

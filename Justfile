@@ -4,8 +4,8 @@ cbindgen:
 
 # Build and install the nod Python bindings (dev mode)
 py-dev:
-    cd nod && uv run --with maturin maturin develop --uv
+    cd nod && uv pip install -e .
 
 # Build and install the nod Python bindings (release mode)
 py-release:
-    cd nod && uv run --with maturin maturin develop --uv --release
+    cd nod && uv pip install -e . --config-settings build-args='--release'
