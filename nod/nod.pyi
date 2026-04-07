@@ -257,8 +257,8 @@ class DiscWriter:
     ) -> DiscFinalization:
         """Convert and write the disc image to *output_path*.
 
-        *callback*, if provided, is called as ``callback(progress, total)`` after
-        processing completes and can be used to display a final progress update.
+        An optional *callback* ``(progress: int, total: int) -> None`` is called after
+        each chunk is written and can be used to display progress.
 
         Set ``digest_*`` flags to compute and return the corresponding checksums.
 
