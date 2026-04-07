@@ -654,9 +654,14 @@ impl PyDiscWriter {
             self.inner.lock().unwrap().0.process(
                 |data, progress, total| {
                     file_write.lock().unwrap().write_all(&data)?;
-                    if callback.is_some() {
-                        // Signal to call back on the Python side after releasing the thread lock
-                        let _ = (progress, total);
+                    if let Some(callback) = &callback {
+                        let callback_result: std::io::Result<()> = Python::attach(|inner_py| {
+                            callback.call1(inner_py, (progress, total)).map_err(|err| {
+                                std::io::Error::new(std::io::ErrorKind::Other, format!("{err}"))
+                            })?;
+                            Ok(())
+                        });
+                        callback_result?;
                     }
                     Ok(())
                 },
@@ -686,12 +691,6 @@ impl PyDiscWriter {
                 .unwrap()
                 .flush()
                 .map_err(|e| PyIOError::new_err(format!("{e}")))?;
-        }
-
-        if let Some(cb) = &callback {
-            let bound = cb.bind(py);
-            let bound_val = self.inner.lock().unwrap().0.progress_bound();
-            bound.call1((bound_val, bound_val))?;
         }
 
         Ok(PyDiscFinalization {

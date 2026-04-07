@@ -38,6 +38,20 @@ class TestDiscWriter:
         finally:
             out_path.unlink()
 
+    def test_process_to_iso_with_failed_callback(self, disc: nod.DiscReader):
+        writer = nod.DiscWriter(disc, "ISO")
+
+        def failing_callback(progress, total):
+            raise ValueError("Callback failed!")
+
+        with tempfile.NamedTemporaryFile(suffix=".iso", delete=False) as f:
+            out_path = Path(f.name)
+        try:
+            with pytest.raises(OSError, match="Failed to write disc data"):
+                writer.process(str(out_path), callback=failing_callback)
+        finally:
+            out_path.unlink()
+
     def test_process_produces_valid_disc(self, disc: nod.DiscReader):
         writer = nod.DiscWriter(disc, "ISO")
         with tempfile.NamedTemporaryFile(suffix=".iso", delete=False) as f:
