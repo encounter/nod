@@ -148,7 +148,7 @@ impl PyPartitionInfo {
 
 /// A single file system entry. Returned by [`Fst.find`] and [`Fst.__iter__`].
 /// Pass to [`PartitionReader.read_file`] to read the file contents.
-#[pyclass(name = "FstNode", frozen)]
+#[pyclass(name = "FstNode", frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyFstNode {
     /// The name component of this entry (last path segment).
@@ -624,7 +624,7 @@ impl PyDiscWriter {
         &self,
         py: Python<'_>,
         output_path: &str,
-        callback: Option<PyObject>,
+        callback: Option<Py<PyAny>>,
         digest_crc32: bool,
         digest_md5: bool,
         digest_sha1: bool,
@@ -650,7 +650,7 @@ impl PyDiscWriter {
         let file = Arc::new(Mutex::new(BufWriter::new(file)));
         let file_write = Arc::clone(&file);
 
-        let result = py.allow_threads(|| {
+        let result = py.detach(|| {
             self.inner.lock().unwrap().0.process(
                 |data, progress, total| {
                     file_write.lock().unwrap().write_all(&data)?;
