@@ -41,7 +41,7 @@ class TestDiscWriter:
     def test_process_to_iso_with_failed_callback(self, disc: nod.DiscReader):
         writer = nod.DiscWriter(disc, "ISO")
 
-        def failing_callback(progress, total):
+        def failing_callback(progress: int, total: int) -> None:
             raise ValueError("Callback failed!")
 
         with tempfile.NamedTemporaryFile(suffix=".iso", delete=False) as f:

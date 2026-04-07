@@ -66,6 +66,9 @@ extend-select = [
     "PLR0206", # Cannot have defined parameters for properties
     "PLR0133", # Two constants compared in a comparison, consider replacing {left_constant} {op} {right_constant}
     "PLR0124", # Name compared with itself, consider replacing {actual}
+
+    # type hints
+    "ANN001", # missing type hint for function argument
 ]
 ignore = [
     "ISC001",  # may cause conflicts with formatter

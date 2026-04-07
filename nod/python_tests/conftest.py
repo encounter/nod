@@ -5,7 +5,7 @@ import pytest
 import nod
 
 
-def pytest_configure(config):
+def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "requires_disc: test requires GC_ISO_PATH to be set"
     )
