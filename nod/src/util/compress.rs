@@ -423,6 +423,8 @@ pub(crate) mod zstd_api {
 
     use super::{CStr, zstd_raw};
 
+    const ZSTD_ERROR_DST_SIZE_TOO_SMALL: usize = 70usize.wrapping_neg();
+
     pub fn compress_bound(size: usize) -> usize { unsafe { zstd_raw::ZSTD_compressBound(size) } }
 
     fn map_error_code(code: usize) -> io::Error {
@@ -448,9 +450,6 @@ pub(crate) mod zstd_api {
     }
 
     pub fn compress(buf: &[u8], level: i8, out: &mut Vec<u8>) -> io::Result<bool> {
-        if out.capacity() < compress_bound(buf.len()) {
-            return Ok(false);
-        }
         out.resize(out.capacity(), 0);
         let code = unsafe {
             zstd_raw::ZSTD_compress(
@@ -462,6 +461,11 @@ pub(crate) mod zstd_api {
             )
         };
         if unsafe { zstd_raw::ZSTD_isError(code) } != 0 {
+            // dstSize_tooSmall means compressed data doesn't fit; signal caller to store uncompressed
+            if code == ZSTD_ERROR_DST_SIZE_TOO_SMALL {
+                out.clear();
+                return Ok(false);
+            }
             return Err(map_error_code(code));
         }
         out.truncate(code);
