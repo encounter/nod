@@ -142,7 +142,7 @@ impl BlockReaderTGC {
             });
         }
         write_info.sort_unstable_by(|a, b| a.offset.cmp(&b.offset).then(a.size.cmp(&b.size)));
-        let write_info = insert_junk_data(write_info, &boot_header);
+        let write_info = insert_junk_data(write_info, &boot_header, false);
 
         let file_callback = FileCallbackTGC::new(inner, raw_fst, header);
         let disc_id = *array_ref![disc_header.game_id, 0, 4];
