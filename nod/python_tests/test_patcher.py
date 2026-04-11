@@ -1,7 +1,8 @@
+from pathlib import Path
+
 import pytest
 
 import nod
-
 
 # ---------------------------------------------------------------------------
 # Construction / validation
@@ -27,7 +28,7 @@ class TestDiscPatcherConstruct:
         assert "2" in repr(patcher)
 
     def test_wii_disc_raises(self, wii_disc: nod.DiscReader):
-        with pytest.raises(ValueError, match="(?i)wii"):
+        with pytest.raises(ValueError, match=r"(?i)wii"):
             nod.DiscPatcher(wii_disc)
 
 
@@ -119,7 +120,9 @@ class TestDiscPatcherBuild:
 
 
 class TestDiscPatcherFileIntegrity:
-    def _smallest_file(self, disc: nod.DiscReader) -> tuple[nod.PartitionReader, nod.FstNode]:
+    def _smallest_file(
+        self, disc: nod.DiscReader
+    ) -> tuple[nod.PartitionReader, nod.FstNode]:
         partition = disc.open_partition_kind("Data")
         meta = partition.meta()
         files: list[nod.FstNode] = sorted(
@@ -159,7 +162,7 @@ class TestDiscPatcherFileIntegrity:
     def test_replaced_file_different_size(self, disc: nod.DiscReader):
         _, node = self._smallest_file(disc)
         # Use a size guaranteed to be different from the original (original >= 1 byte)
-        new_data = b"\xDE\xAD\xBE\xEF" * 64  # 256 bytes
+        new_data = b"\xde\xad\xbe\xef" * 64  # 256 bytes
 
         patcher = nod.DiscPatcher(disc)
         patcher.add_file(node.path, new_data)
@@ -208,7 +211,9 @@ class TestDiscPatcherFileIntegrity:
         assert node.length == len(new_data)
         assert patched_partition.read_file(node) == new_data
 
-    def test_all_original_files_present_after_unmodified_build(self, disc: nod.DiscReader):
+    def test_all_original_files_present_after_unmodified_build(
+        self, disc: nod.DiscReader
+    ):
         partition = disc.open_partition_kind("Data")
         original_paths = {n.path for n in partition.meta().fst() if n.is_file}
 
@@ -226,13 +231,13 @@ class TestDiscPatcherFileIntegrity:
 
 
 class TestDiscPatcherWriterRoundtrip:
-    def test_patched_disc_writeable_to_iso(self, disc: nod.DiscReader, tmp_path):
+    def test_patched_disc_writeable_to_iso(self, disc: nod.DiscReader, tmp_path: Path):
         patched = nod.DiscPatcher(disc).build()
         out = tmp_path / "patched.iso"
         nod.DiscWriter(patched, "ISO").process(str(out))
         assert out.stat().st_size > 0
 
-    def test_written_iso_reopens_correctly(self, disc: nod.DiscReader, tmp_path):
+    def test_written_iso_reopens_correctly(self, disc: nod.DiscReader, tmp_path: Path):
         _, node = _smallest_file_in(disc)
         new_data = b"roundtrip_check" * 8
 
