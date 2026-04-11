@@ -25,6 +25,14 @@ def disc(iso_path: str) -> nod.DiscReader:
 
 
 @pytest.fixture(scope="session")
+def wii_disc() -> nod.DiscReader:
+    path = os.environ.get("WII_ISO_PATH")
+    if not path:
+        pytest.skip("WII_ISO_PATH not set")
+    return nod.DiscReader(path)
+
+
+@pytest.fixture(scope="session")
 def partition(disc: nod.DiscReader) -> nod.PartitionReader:
     return disc.open_partition_kind("Data")
 

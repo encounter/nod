@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufWriter, Read as IoRead, Seek, SeekFrom, Write};
+use std::io::{self, BufWriter, Read as IoRead, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 
 use crate::common::{Compression, Format, PartitionKind as NodPartitionKind};
@@ -720,6 +721,266 @@ impl PyDiscWriter {
 }
 
 // ---------------------------------------------------------------------------
+// DiscPatcher
+// ---------------------------------------------------------------------------
+
+/// File data provider used by the streaming DiscReader produced by DiscPatcher::build.
+#[derive(Clone)]
+struct PatcherCallback {
+    files: HashMap<String, Arc<[u8]>>,
+}
+
+impl crate::build::gc::FileCallback for PatcherCallback {
+    fn read_file(&mut self, out: &mut [u8], name: &str, offset: u64) -> io::Result<()> {
+        let data = self.files.get(name).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, format!("DiscPatcher: file not found: {name}"))
+        })?;
+        let start = offset as usize;
+        let end = start + out.len();
+        out.copy_from_slice(data.get(start..end).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("DiscPatcher: {name}: read {start}..{end} out of bounds (size {})", data.len()),
+            )
+        })?);
+        Ok(())
+    }
+}
+
+/// Patches or extends a GameCube disc by adding or replacing files.
+///
+/// The result of :meth:`build` is a :class:`DiscReader` that can be passed
+/// directly to :class:`DiscWriter` for conversion to any supported output format.
+///
+/// Example::
+///
+///     disc = nod.DiscReader("original.iso")
+///     patcher = nod.DiscPatcher(disc)
+///     with open("new_audio.dsp", "rb") as f:
+///         patcher.add_file("files/audio/bgm.dsp", f.read())
+///     patched = patcher.build()
+///     nod.DiscWriter(patched, "ISO").process("patched.iso")
+#[pyclass(name = "DiscPatcher")]
+pub struct PyDiscPatcher {
+    disc: Arc<Mutex<NodDiscReader>>,
+    overrides: HashMap<String, Arc<[u8]>>,
+}
+
+#[pymethods]
+impl PyDiscPatcher {
+    /// Create a patcher for *disc*.
+    ///
+    /// Raises :exc:`ValueError` if *disc* is a Wii disc.
+    #[new]
+    fn new(disc: &PyDiscReader) -> PyResult<Self> {
+        {
+            let guard = disc.inner.lock().unwrap();
+            if guard.header().is_wii() {
+                return Err(PyValueError::new_err(
+                    "DiscPatcher only supports GameCube discs, not Wii",
+                ));
+            }
+        }
+        Ok(Self { disc: Arc::clone(&disc.inner), overrides: HashMap::new() })
+    }
+
+    /// Add a new file or replace an existing file in the disc.
+    ///
+    /// *path* is the FST path (e.g. ``"files/audio/bgm.dsp"``). Leading
+    /// slashes are stripped. Calling this a second time with the same path
+    /// replaces the previous override.
+    ///
+    /// Raises :exc:`ValueError` if *path* starts with ``"sys/"``.
+    fn add_file(&mut self, path: &str, data: &[u8]) -> PyResult<()> {
+        let path = path.trim_start_matches('/').to_string();
+        if path.starts_with("sys/") {
+            return Err(PyValueError::new_err(
+                "Cannot override system files (sys/) via add_file",
+            ));
+        }
+        self.overrides.insert(path, Arc::from(data));
+        Ok(())
+    }
+
+    /// Build a new :class:`DiscReader` with all patches applied.
+    ///
+    /// Reads all files from the source disc, applies any overrides added via
+    /// :meth:`add_file`, and returns a :class:`DiscReader` ready for
+    /// :class:`DiscWriter`. Non-overridden files are read from the source disc
+    /// into memory at this point.
+    ///
+    /// Raises :exc:`OSError` if the source disc cannot be read.
+    /// Raises :exc:`RuntimeError` if the disc layout is invalid.
+    fn build(&self) -> PyResult<PyDiscReader> {
+        use crate::build::gc::{FileInfo, GCPartitionBuilder, PartitionOverrides};
+        use crate::disc::{BB2_OFFSET, BI2_SIZE, BOOT_SIZE};
+        use crate::disc::fst::Fst;
+
+        // Open the data partition (index 0 on GameCube).
+        let (meta, mut partition) = {
+            let guard = self.disc.lock().unwrap();
+            let mut part =
+                guard.open_partition(0, &PartitionOptions::default()).map_err(nod_err)?;
+            let meta = part.meta().map_err(nod_err)?;
+            (meta, part)
+        };
+
+        let mut builder = GCPartitionBuilder::new(false, PartitionOverrides::default());
+        // Maps FST path / sys-file name → file bytes for the streaming callback.
+        let mut file_map: HashMap<String, Arc<[u8]>> = HashMap::new();
+
+        // ---- System files ------------------------------------------------
+        // boot.bin: disc header + boot header.  locate_sys_files() reads this
+        // via the sys_file_callback to populate disc_header / boot_header.
+        //
+        // Zero out all layout offsets/sizes in BootHeader so the builder
+        // recalculates them fresh.  This avoids overlaps (e.g. Kirby Air Ride
+        // where the original DOL offset overlaps the apploader) and handles
+        // games where the DOL is stored as a user-data FST entry (Metroid
+        // Prime 2) rather than in the system area.
+        let mut boot_bytes = meta.raw_boot.as_ref().to_vec();
+        // BootHeader starts at BB2_OFFSET (0x420).  Field layout (all U32 BE):
+        //   +0  dol_offset
+        //   +4  fst_offset
+        //   +8  fst_size
+        //  +12  fst_max_size
+        //  +16  fst_memory_address  (RAM load address – leave as-is)
+        //  +20  user_offset
+        //  +24  user_size
+        for field_off in [0usize, 4, 8, 12, 20, 24] {
+            let start = BB2_OFFSET + field_off;
+            boot_bytes[start..start + 4].fill(0);
+        }
+        builder
+            .add_file(FileInfo {
+                name: "sys/boot.bin".to_string(),
+                size: boot_bytes.len() as u64,
+                offset: Some(0),
+                alignment: None,
+            })
+            .map_err(nod_err)?;
+        file_map.insert("sys/boot.bin".to_string(), Arc::from(boot_bytes.as_slice()));
+
+        // bi2.bin: debug / region info.
+        builder
+            .add_file(FileInfo {
+                name: "sys/bi2.bin".to_string(),
+                size: meta.raw_bi2.len() as u64,
+                offset: Some(BOOT_SIZE as u64),
+                alignment: None,
+            })
+            .map_err(nod_err)?;
+        file_map.insert("sys/bi2.bin".to_string(), Arc::from(meta.raw_bi2.as_ref() as &[u8]));
+
+        // apploader.img: content provided at stream time via PatcherCallback.
+        let apploader_offset = (BOOT_SIZE + BI2_SIZE) as u64;
+        builder
+            .add_file(FileInfo {
+                name: "sys/apploader.img".to_string(),
+                size: meta.raw_apploader.len() as u64,
+                offset: Some(apploader_offset),
+                alignment: None,
+            })
+            .map_err(nod_err)?;
+        file_map.insert(
+            "sys/apploader.img".to_string(),
+            Arc::from(meta.raw_apploader.as_ref()),
+        );
+
+        // main.dol: always placed after the apploader by the builder because
+        // we zeroed dol_offset above.
+        builder
+            .add_file(FileInfo {
+                name: "sys/main.dol".to_string(),
+                size: meta.raw_dol.len() as u64,
+                offset: None,
+                alignment: Some(128),
+            })
+            .map_err(nod_err)?;
+        file_map.insert("sys/main.dol".to_string(), Arc::from(meta.raw_dol.as_ref()));
+
+        // ---- User files from the original FST ----------------------------
+        let fst = Fst::new(&meta.raw_fst)
+            .map_err(|e| PyRuntimeError::new_err(format!("Invalid FST: {e}")))?;
+
+        for (_, node, path) in fst.iter() {
+            if !node.is_file() {
+                continue;
+            }
+            let data: Arc<[u8]> = if let Some(ov) = self.overrides.get(&path) {
+                ov.clone()
+            } else {
+                // Read file from the source partition.  Some discs have FST
+                // entries whose data lives in a junk region (LFG-generated
+                // padding).  Reads of those entries typically succeed and
+                // return the junk bytes; if they fail for any reason we fall
+                // back to zeros so the file at least appears in the FST.
+                let size = node.length() as usize;
+                let data = partition
+                    .open_file(node)
+                    .ok()
+                    .and_then(|mut f| {
+                        let mut buf = Vec::with_capacity(size);
+                        f.read_to_end(&mut buf).ok().map(|_| buf)
+                    })
+                    .unwrap_or_else(|| vec![0u8; size]);
+                Arc::from(data)
+            };
+            builder
+                .add_file(FileInfo {
+                    name: path.clone(),
+                    size: data.len() as u64,
+                    offset: None,
+                    alignment: None,
+                })
+                .map_err(nod_err)?;
+            file_map.insert(path, data);
+        }
+
+        // ---- New files from overrides not present in the original FST ----
+        for (path, data) in &self.overrides {
+            if !file_map.contains_key(path.as_str()) {
+                builder
+                    .add_file(FileInfo {
+                        name: path.clone(),
+                        size: data.len() as u64,
+                        offset: None,
+                        alignment: None,
+                    })
+                    .map_err(nod_err)?;
+                file_map.insert(path.clone(), data.clone());
+            }
+        }
+
+        // ---- Build layout ------------------------------------------------
+        // sys_file_callback is called during build() for boot.bin and bi2.bin.
+        let sys_files = file_map.clone();
+        let partition_writer = builder
+            .build(|w, name| {
+                let data = sys_files.get(name).ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("DiscPatcher build: file not found: {name}"),
+                    )
+                })?;
+                w.write_all(data)
+            })
+            .map_err(nod_err)?;
+
+        let callback = PatcherCallback { files: file_map };
+        let stream = partition_writer.into_cloneable_stream(callback).map_err(nod_err)?;
+        let reader =
+            NodDiscReader::new_stream(stream, &DiscOptions::default()).map_err(nod_err)?;
+
+        Ok(PyDiscReader { inner: Arc::new(Mutex::new(reader)) })
+    }
+
+    fn __repr__(&self) -> String {
+        format!("DiscPatcher(overrides={})", self.overrides.len())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Module registration
 // ---------------------------------------------------------------------------
 
@@ -735,5 +996,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFstIter>()?;
     m.add_class::<PyDiscWriter>()?;
     m.add_class::<PyDiscFinalization>()?;
+    m.add_class::<PyDiscPatcher>()?;
     Ok(())
 }

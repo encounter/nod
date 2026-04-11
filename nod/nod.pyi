@@ -286,3 +286,52 @@ class DiscWriter:
         """
 
     def __repr__(self) -> str: ...
+
+class DiscPatcher:
+    """Patches or extends a GameCube disc by adding or replacing files.
+
+    The result of :meth:`build` is a :class:`DiscReader` that can be passed
+    directly to :class:`DiscWriter` for conversion to any supported output format.
+
+    Only GameCube discs are supported.
+
+    Example::
+
+        disc = nod.DiscReader("original.iso")
+        patcher = nod.DiscPatcher(disc)
+        with open("new_audio.dsp", "rb") as f:
+            patcher.add_file("files/audio/bgm.dsp", f.read())
+        patched = patcher.build()
+        nod.DiscWriter(patched, "ISO").process("patched.iso")
+    """
+
+    def __init__(self, disc: DiscReader) -> None:
+        """Create a patcher for *disc*.
+
+        Raises :exc:`ValueError` if *disc* is a Wii disc.
+        """
+
+    def add_file(self, path: str, data: bytes) -> None:
+        """Add a new file or replace an existing one.
+
+        *path* is the FST path (e.g. ``"files/audio/bgm.dsp"``). Leading
+        slashes are stripped. Calling this again with the same path replaces
+        the previous data.
+
+        Raises :exc:`ValueError` if *path* starts with ``"sys/"``.
+        """
+
+    def build(self) -> DiscReader:
+        """Build a patched :class:`DiscReader` with all overrides applied.
+
+        Reads all files from the source disc into memory, substituting any
+        overrides added via :meth:`add_file`, then returns a new
+        :class:`DiscReader` ready for :class:`DiscWriter`.
+
+        New files (paths not present in the original FST) are appended.
+
+        Raises :exc:`OSError` if the source disc cannot be read.
+        Raises :exc:`RuntimeError` if the disc layout is invalid.
+        """
+
+    def __repr__(self) -> str: ...
