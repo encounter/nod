@@ -194,7 +194,7 @@ impl GCPartitionLayout {
                     )));
                 }
                 self.disc_header.as_mut_bytes().copy_from_slice(&data[..size_of::<DiscHeader>()]);
-                self.boot_header.as_mut_bytes().copy_from_slice(&data[size_of::<DiscHeader>()..]);
+                self.boot_header.as_mut_bytes().copy_from_slice(&data[BB2_OFFSET..BB2_OFFSET + size_of::<BootHeader>()]);
                 *handled = true;
                 continue;
             }
