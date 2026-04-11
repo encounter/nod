@@ -1,0 +1,196 @@
+name: Python
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    name: Build wheels (${{ matrix.platform }}, ${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux (glibc)
+          - os: ubuntu-latest
+            platform: linux
+            target: x86_64
+            args: --zig
+          - os: ubuntu-latest
+            platform: linux
+            target: i686
+            args: --zig
+          - os: ubuntu-latest
+            platform: linux
+            target: aarch64
+            args: --zig
+          - os: ubuntu-latest
+            platform: linux
+            target: armv7
+            args: --zig
+          # Linux (musl libc)
+          - os: ubuntu-latest
+            platform: musllinux
+            target: x86_64
+            manylinux: musllinux_1_2
+            args: --zig
+          - os: ubuntu-latest
+            platform: musllinux
+            target: i686
+            manylinux: musllinux_1_2
+            args: --zig
+          - os: ubuntu-latest
+            platform: musllinux
+            target: aarch64
+            manylinux: musllinux_1_2
+            args: --zig
+          - os: ubuntu-latest
+            platform: musllinux
+            target: armv7
+            manylinux: musllinux_1_2
+            args: --zig
+          # macOS
+          - os: macos-latest
+            platform: macos
+            target: x86_64
+          - os: macos-latest
+            platform: macos
+            target: aarch64
+          # Windows
+          - os: windows-latest
+            platform: windows
+            target: x86_64
+            python_arch: x64
+          - os: windows-latest
+            platform: windows
+            target: i686
+            python_arch: x86
+          - os: windows-11-arm
+            platform: windows
+            target: aarch64
+            python_arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        if: matrix.python_arch
+        with:
+          architecture: ${{ matrix.python_arch }}
+          python-version: 3.x
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: nod
+          target: ${{ matrix.target }}
+          args: --release --out dist ${{ matrix.args }}
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+      
+      - name: Setup Python (free-threaded)
+        uses: actions/setup-python@v6
+        if: matrix.python_arch
+        with:
+          architecture: ${{ matrix.python_arch }}
+          python-version: |
+            3.13t
+            3.14t
+      - name: Build free-threaded wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: nod
+          target: ${{ matrix.target }}
+          args: --release --out dist ${{ matrix.args }} -i python3.13t -i python3.14t
+          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.platform }}-${{ matrix.target }}
+          path: nod/dist
+
+  sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: nod
+          command: sdist
+          args: --out dist
+      - name: Upload sdist
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdist
+          path: nod/dist
+
+  test:
+    name: Test wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [wheels]
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-22.04-arm
+          - macos-latest
+          - macos-15-intel
+          - windows-latest
+          - windows-11-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          # Windows ARM support only available for 3.11+
+          python-version: "3.11"
+      - name: Download wheels
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheels-*
+          path: nod/dist
+          merge-multiple: true
+      - name: Run tests
+        shell: bash
+        working-directory: nod
+        run: |
+          pip install nod-rs --no-index --find-links dist --force-reinstall
+          pip install pytest
+          pytest
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    needs: [wheels, sdist, test]
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v8
+        with:
+          path: nod/dist
+          merge-multiple: true
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: nod/dist/*
+      - name: Publish to PyPI
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: PyO3/maturin-action@v1
+        with:
+          command: upload
+          args: --non-interactive --skip-existing nod/dist/*
