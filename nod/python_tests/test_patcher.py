@@ -72,6 +72,90 @@ class TestDiscPatcherAddFile:
 
 
 # ---------------------------------------------------------------------------
+# set_header() — validation
+# ---------------------------------------------------------------------------
+
+
+class TestDiscPatcherSetHeader:
+    def test_game_id_wrong_length_raises(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        with pytest.raises(ValueError, match="6"):
+            patcher.set_header(game_id="SHORT")
+
+    def test_game_id_too_long_raises(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        with pytest.raises(ValueError, match="6"):
+            patcher.set_header(game_id="TOOLONGID")
+
+    def test_no_args_is_noop(self, disc: nod.DiscReader):
+        # Calling set_header() with no arguments must not raise and must not
+        # change anything in the built disc.
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header()
+        patched = patcher.build()
+        assert patched.header().game_id == disc.header().game_id
+        assert patched.header().game_title == disc.header().game_title
+
+    def test_set_game_id(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="TSTID0")
+        patched = patcher.build()
+        assert patched.header().game_id == "TSTID0"
+
+    def test_set_game_title(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_title="My Patched Game")
+        patched = patcher.build()
+        assert patched.header().game_title == "My Patched Game"
+
+    def test_set_disc_num(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(disc_num=1)
+        patched = patcher.build()
+        assert patched.header().disc_num == 1
+
+    def test_set_disc_version(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(disc_version=2)
+        patched = patcher.build()
+        assert patched.header().disc_version == 2
+
+    def test_set_multiple_fields(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="MULTI0", game_title="Multi Override", disc_num=0)
+        patched = patcher.build()
+        assert patched.header().game_id == "MULTI0"
+        assert patched.header().game_title == "Multi Override"
+        assert patched.header().disc_num == 0
+
+    def test_unset_fields_preserved(self, disc: nod.DiscReader):
+        # Overriding game_id must not change game_title.
+        original_title = disc.header().game_title
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="KEEP00")
+        patched = patcher.build()
+        assert patched.header().game_title == original_title
+
+    def test_header_override_combined_with_file_patch(self, disc: nod.DiscReader):
+        # Header override and file override must both take effect.
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="COMBO0")
+        patcher.add_file("files/__combo_test__.bin", b"combo")
+        patched = patcher.build()
+        assert patched.header().game_id == "COMBO0"
+        fst = patched.open_partition_kind("Data").meta().fst()
+        node = fst.find("/files/__combo_test__.bin")
+        assert node is not None
+
+    def test_set_header_idempotent_on_multiple_builds(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="IDEM00")
+        r1 = patcher.build()
+        r2 = patcher.build()
+        assert r1.header().game_id == r2.header().game_id == "IDEM00"
+
+
+# ---------------------------------------------------------------------------
 # build() — structural checks
 # ---------------------------------------------------------------------------
 

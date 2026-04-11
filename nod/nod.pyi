@@ -164,7 +164,6 @@ class DiscReader:
     """
 
     def __init__(self, path: str) -> None: ...
-
     def header(self) -> DiscHeader:
         """Return the disc's primary header."""
 
@@ -319,6 +318,24 @@ class DiscPatcher:
         the previous data.
 
         Raises :exc:`ValueError` if *path* starts with ``"sys/"``.
+        """
+
+    def set_header(
+        self,
+        *,
+        game_id: str | None = None,
+        game_title: str | None = None,
+        disc_num: int | None = None,
+        disc_version: int | None = None,
+        audio_streaming: bool | None = None,
+        audio_stream_buf_size: int | None = None,
+    ) -> None:
+        """Override disc header fields in the patched disc.
+
+        All parameters are keyword-only and optional; only those provided
+        are changed.
+
+        Raises :exc:`ValueError` if *game_id* is not exactly 6 characters.
         """
 
     def build(self) -> DiscReader:

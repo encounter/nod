@@ -764,6 +764,7 @@ impl crate::build::gc::FileCallback for PatcherCallback {
 pub struct PyDiscPatcher {
     disc: Arc<Mutex<NodDiscReader>>,
     overrides: HashMap<String, Arc<[u8]>>,
+    header_overrides: crate::build::gc::PartitionOverrides,
 }
 
 #[pymethods]
@@ -781,7 +782,11 @@ impl PyDiscPatcher {
                 ));
             }
         }
-        Ok(Self { disc: Arc::clone(&disc.inner), overrides: HashMap::new() })
+        Ok(Self {
+            disc: Arc::clone(&disc.inner),
+            overrides: HashMap::new(),
+            header_overrides: crate::build::gc::PartitionOverrides::default(),
+        })
     }
 
     /// Add a new file or replace an existing file in the disc.
@@ -799,6 +804,63 @@ impl PyDiscPatcher {
             ));
         }
         self.overrides.insert(path, Arc::from(data));
+        Ok(())
+    }
+
+    /// Override disc header fields in the patched disc.
+    ///
+    /// All parameters are optional; only those provided are changed.
+    ///
+    /// - *game_id*: six-character ASCII game ID, e.g. ``"GM8E01"``
+    /// - *game_title*: game title string
+    /// - *disc_num*: disc number (0-based)
+    /// - *disc_version*: disc revision number
+    /// - *audio_streaming*: audio streaming flag (``True``/``False``)
+    /// - *audio_stream_buf_size*: audio stream buffer size
+    #[pyo3(signature = (
+        *,
+        game_id=None,
+        game_title=None,
+        disc_num=None,
+        disc_version=None,
+        audio_streaming=None,
+        audio_stream_buf_size=None,
+    ))]
+    fn set_header(
+        &mut self,
+        game_id: Option<&str>,
+        game_title: Option<&str>,
+        disc_num: Option<u8>,
+        disc_version: Option<u8>,
+        audio_streaming: Option<bool>,
+        audio_stream_buf_size: Option<u8>,
+    ) -> PyResult<()> {
+        if let Some(id) = game_id {
+            if id.len() != 6 {
+                return Err(PyValueError::new_err(format!(
+                    "game_id must be exactly 6 characters, got {}",
+                    id.len()
+                )));
+            }
+            let mut arr = [0u8; 6];
+            arr.copy_from_slice(id.as_bytes());
+            self.header_overrides.game_id = Some(arr);
+        }
+        if let Some(title) = game_title {
+            self.header_overrides.game_title = Some(title.to_string());
+        }
+        if let Some(v) = disc_num {
+            self.header_overrides.disc_num = Some(v);
+        }
+        if let Some(v) = disc_version {
+            self.header_overrides.disc_version = Some(v);
+        }
+        if let Some(v) = audio_streaming {
+            self.header_overrides.audio_streaming = Some(v);
+        }
+        if let Some(v) = audio_stream_buf_size {
+            self.header_overrides.audio_stream_buf_size = Some(v);
+        }
         Ok(())
     }
 
@@ -825,7 +887,7 @@ impl PyDiscPatcher {
             (meta, part)
         };
 
-        let mut builder = GCPartitionBuilder::new(false, PartitionOverrides::default());
+        let mut builder = GCPartitionBuilder::new(false, self.header_overrides.clone());
         // Maps FST path / sys-file name → file bytes for the streaming callback.
         let mut file_map: HashMap<String, Arc<[u8]>> = HashMap::new();
 
