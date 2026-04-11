@@ -278,6 +278,7 @@ impl GCPartitionLayout {
             }
             let len = game_title.len().min(max_size);
             self.disc_header.game_title[..len].copy_from_slice(&game_title.as_bytes()[..len]);
+            self.disc_header.game_title[len..].fill(0);
         }
         if let Some(disc_num) = overrides.disc_num {
             self.disc_header.disc_num = disc_num;
