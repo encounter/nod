@@ -21,7 +21,7 @@ def iso_path() -> str:
 
 @pytest.fixture(scope="session")
 def disc(iso_path: str) -> nod.DiscReader:
-    return nod.open_disc(iso_path)
+    return nod.DiscReader(iso_path)
 
 
 @pytest.fixture(scope="session")

@@ -145,8 +145,25 @@ class PartitionReader:
 class DiscReader:
     """Reader for a GameCube or Wii disc image.
 
-    Construct with :func:`open_disc`.
+    Supports ISO, CISO, GCZ, NFS, RVZ, WBFS, WIA, and TGC formats.
+
+    Raises :exc:`FileNotFoundError` if the file does not exist.
+    Raises :exc:`OSError` if the file cannot be opened or the format is not recognised.
+
+    Example::
+
+        import nod
+
+        disc = nod.DiscReader("game.iso")
+        partition = disc.open_partition_kind("Data")
+        meta = partition.meta()
+        fst = meta.fst()
+        node = fst.find("/MP3/Worlds.txt")
+        if node:
+            data = partition.read_file(node)
     """
+
+    def __init__(self, path: str) -> None: ...
 
     def header(self) -> DiscHeader:
         """Return the disc's primary header."""
@@ -213,7 +230,7 @@ class DiscWriter:
 
     Construct by passing a :class:`DiscReader` and target format::
 
-        disc = nod.open_disc("game.rvz")
+        disc = nod.DiscReader("game.rvz")
         writer = nod.DiscWriter(disc, "ISO")
         fin = writer.process("output.iso", digest_crc32=True)
         print(f"CRC32: {fin.crc32:#010x}")
@@ -269,24 +286,3 @@ class DiscWriter:
         """
 
     def __repr__(self) -> str: ...
-
-def open_disc(path: str) -> DiscReader:
-    """Open a disc image for reading from *path*.
-
-    Supports ISO, CISO, GCZ, NFS, RVZ, WBFS, WIA, and TGC formats.
-
-    Raises :exc:`FileNotFoundError` if the file does not exist.
-    Raises :exc:`OSError` if the file cannot be opened or the format is not recognised.
-
-    Example::
-
-        import nod
-
-        disc = nod.open_disc("game.iso")
-        partition = disc.open_partition_kind("Data")
-        meta = partition.meta()
-        fst = meta.fst()
-        node = fst.find("/MP3/Worlds.txt")
-        if node:
-            data = partition.read_file(node)
-    """

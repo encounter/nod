@@ -404,6 +404,18 @@ pub struct PyDiscReader {
 
 #[pymethods]
 impl PyDiscReader {
+    /// Open a disc image for reading from *path*.
+    ///
+    /// Supports ISO, CISO, GCZ, NFS, RVZ, WBFS, WIA, and TGC formats.
+    ///
+    /// Raises :exc:`FileNotFoundError` if the file does not exist.
+    /// Raises :exc:`OSError` if the file cannot be opened or the format is not recognised.
+    #[new]
+    fn new(path: &str) -> PyResult<Self> {
+        let reader = NodDiscReader::new(path, &DiscOptions::default()).map_err(nod_err)?;
+        Ok(PyDiscReader { inner: Arc::new(Mutex::new(reader)) })
+    }
+
     /// Returns the disc's primary header.
     fn header(&self) -> PyDiscHeader {
         let guard = self.inner.lock().unwrap();
@@ -708,37 +720,10 @@ impl PyDiscWriter {
 }
 
 // ---------------------------------------------------------------------------
-// Module-level open_disc() function
-// ---------------------------------------------------------------------------
-
-/// Open a disc image for reading from the given file path.
-///
-/// Supports ISO, CISO, GCZ, NFS, RVZ, WBFS, WIA, and TGC formats.
-///
-/// Example::
-///
-///     import nod
-///     disc = nod.open_disc("game.iso")
-///     header = disc.header()
-///     print(header.game_id, header.game_title)
-///     partition = disc.open_partition_kind("Data")
-///     meta = partition.meta()
-///     fst = meta.fst()
-///     node = fst.find("/MP3/Worlds.txt")
-///     if node:
-///         data = partition.read_file(node)
-#[pyfunction]
-fn open_disc(path: &str) -> PyResult<PyDiscReader> {
-    let reader = NodDiscReader::new(path, &DiscOptions::default()).map_err(nod_err)?;
-    Ok(PyDiscReader { inner: Arc::new(Mutex::new(reader)) })
-}
-
-// ---------------------------------------------------------------------------
 // Module registration
 // ---------------------------------------------------------------------------
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(open_disc, m)?)?;
     m.add_class::<PyDiscReader>()?;
     m.add_class::<PyDiscHeader>()?;
     m.add_class::<PyDiscMeta>()?;

@@ -58,7 +58,7 @@ class TestDiscWriter:
             out_path = Path(f.name)
         try:
             writer.process(str(out_path))
-            out_disc = nod.open_disc(str(out_path))
+            out_disc = nod.DiscReader(str(out_path))
             assert out_disc.header().game_id == disc.header().game_id
             assert out_disc.header().game_title == disc.header().game_title
         finally:

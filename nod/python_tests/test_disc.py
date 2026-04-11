@@ -5,7 +5,7 @@ import nod
 
 def test_open_nonexistent():
     with pytest.raises(FileNotFoundError):
-        nod.open_disc("nonexistent_file.iso")
+        nod.DiscReader("nonexistent_file.iso")
 
 
 class TestDiscReader:
