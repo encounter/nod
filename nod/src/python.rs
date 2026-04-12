@@ -389,8 +389,7 @@ impl PyPartitionReader {
     }
 
     fn __repr__(&self) -> String {
-        let is_wii = self.inner.lock().unwrap().is_wii();
-        format!("PartitionReader(is_wii={})", is_wii)
+        format!("PartitionReader(is_wii={})", self.is_wii())
     }
 }
 
