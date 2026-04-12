@@ -350,6 +350,116 @@ impl PyPartitionMeta {
 }
 
 // ---------------------------------------------------------------------------
+// FileReader
+// ---------------------------------------------------------------------------
+
+/// A lazy, seekable binary file reader backed by a disc partition.
+///
+/// Returned by :meth:`PartitionReader.read_file`. Reads are issued against
+/// the source disc on demand — no data is buffered until you call
+/// :meth:`read`.  Implements the :class:`io.RawIOBase` interface
+/// (``read``, ``seek``, ``tell``, ``readable``, ``seekable``,
+/// ``writable``, context manager).
+#[pyclass(name = "FileReader")]
+pub struct PyFileReader {
+    /// Shared reference to the underlying partition (same object as the
+    /// `PyPartitionReader` that created us).
+    partition: Arc<Mutex<Box<dyn PartitionReader>>>,
+    /// Absolute byte offset of the file within the partition stream.
+    file_offset: u64,
+    /// File size in bytes.
+    file_size: u64,
+    /// Current read position relative to the start of the file.
+    pos: u64,
+    closed: bool,
+}
+
+#[pymethods]
+impl PyFileReader {
+    /// Read and return up to *size* bytes. If *size* is ``-1`` or omitted,
+    /// reads until end of file.
+    #[pyo3(signature = (size = -1))]
+    fn read<'py>(&mut self, py: Python<'py>, size: i64) -> PyResult<Bound<'py, PyBytes>> {
+        self.check_open()?;
+        let remaining = self.file_size.saturating_sub(self.pos);
+        let to_read = if size < 0 { remaining } else { (size as u64).min(remaining) } as usize;
+        if to_read == 0 {
+            return Ok(PyBytes::new(py, &[]));
+        }
+        let abs_pos = self.file_offset + self.pos;
+        let mut buf = vec![0u8; to_read];
+        {
+            let mut guard = self.partition.lock().unwrap();
+            guard.seek(SeekFrom::Start(abs_pos)).map_err(io_err)?;
+            guard.read_exact(&mut buf).map_err(io_err)?;
+        }
+        self.pos += to_read as u64;
+        Ok(PyBytes::new(py, &buf))
+    }
+
+    /// Seek to *pos* bytes relative to *whence*:
+    ///   0 (default) — start of file, 1 — current position, 2 — end of file.
+    ///
+    /// Returns the new absolute position.
+    #[pyo3(signature = (pos, whence = 0))]
+    fn seek(&mut self, pos: i64, whence: i32) -> PyResult<u64> {
+        self.check_open()?;
+        let new_pos: u64 = match whence {
+            0 => pos.max(0) as u64,
+            1 => self.pos.saturating_add_signed(pos),
+            2 => self.file_size.saturating_add_signed(pos),
+            w => return Err(PyValueError::new_err(format!("invalid whence value: {w}"))),
+        };
+        self.pos = new_pos.min(self.file_size);
+        Ok(self.pos)
+    }
+
+    /// Return the current stream position.
+    fn tell(&self) -> PyResult<u64> {
+        self.check_open()?;
+        Ok(self.pos)
+    }
+
+    /// Return the file size in bytes.
+    fn size(&self) -> u64 { self.file_size }
+
+    fn readable(&self) -> bool { true }
+    fn seekable(&self) -> bool { true }
+    fn writable(&self) -> bool { false }
+
+    #[getter]
+    fn closed(&self) -> bool { self.closed }
+
+    fn close(&mut self) { self.closed = true; }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> { slf }
+
+    #[pyo3(signature = (_exc_type=None, _exc_val=None, _exc_tb=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Py<PyAny>>,
+        _exc_val: Option<Py<PyAny>>,
+        _exc_tb: Option<Py<PyAny>>,
+    ) {
+        self.close();
+    }
+
+    fn __repr__(&self) -> String {
+        format!("FileReader(size={}, pos={})", self.file_size, self.pos)
+    }
+}
+
+impl PyFileReader {
+    fn check_open(&self) -> PyResult<()> {
+        if self.closed {
+            Err(PyValueError::new_err("I/O operation on closed file"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PartitionReader
 // ---------------------------------------------------------------------------
 
@@ -371,21 +481,30 @@ impl PyPartitionReader {
         Ok(PyPartitionMeta { inner: Arc::new(meta) })
     }
 
-    /// Reads the contents of a file specified by a [`FstNode`].
-    /// Returns the file data as `bytes`.
-    fn read_file<'py>(&self, py: Python<'py>, node: &PyFstNode) -> PyResult<Bound<'py, PyBytes>> {
+    /// Opens a file identified by *node* for lazy on-demand reading.
+    ///
+    /// Returns a :class:`FileReader` — a seekable, readable binary stream
+    /// that issues reads against the disc on demand. No data is read until
+    /// you call :meth:`FileReader.read`.
+    ///
+    /// Raises :exc:`IsADirectoryError` if *node* is a directory.
+    fn read_file(&self, node: &PyFstNode) -> PyResult<PyFileReader> {
         if !node.is_file {
             return Err(pyo3::exceptions::PyIsADirectoryError::new_err(format!(
                 "{:?} is a directory",
                 node.path
             )));
         }
-        let mut guard = self.inner.lock().unwrap();
-        let mut file = guard.open_file(node.node).map_err(io_err)?;
-        let size = node.length as usize;
-        let mut buf = Vec::with_capacity(size);
-        file.read_to_end(&mut buf).map_err(io_err)?;
-        Ok(PyBytes::new(py, &buf))
+        let is_wii = self.inner.lock().unwrap().is_wii();
+        let file_offset = node.node.offset(is_wii);
+        let file_size = node.length as u64;
+        Ok(PyFileReader {
+            partition: Arc::clone(&self.inner),
+            file_offset,
+            file_size,
+            pos: 0,
+            closed: false,
+        })
     }
 
     fn __repr__(&self) -> String {
@@ -1050,6 +1169,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDiscHeader>()?;
     m.add_class::<PyDiscMeta>()?;
     m.add_class::<PyPartitionInfo>()?;
+    m.add_class::<PyFileReader>()?;
     m.add_class::<PyPartitionReader>()?;
     m.add_class::<PyPartitionMeta>()?;
     m.add_class::<PyFst>()?;

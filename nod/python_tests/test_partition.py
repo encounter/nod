@@ -117,7 +117,9 @@ class TestFst:
         if not files:
             pytest.skip("No readable files in FST")
         node = files[0]
-        data = partition.read_file(node)
+        f = partition.read_file(node)
+        assert isinstance(f, nod.FileReader)
+        data = f.read()
         assert isinstance(data, bytes)
         assert len(data) == node.length
 
@@ -126,7 +128,7 @@ class TestFst:
         checked = 0
         for node in fst:
             if node.is_file and node.length > 0:
-                data = partition.read_file(node)
+                data = partition.read_file(node).read()
                 assert len(data) == node.length, (
                     f"{node.path}: expected {node.length} bytes, got {len(data)}"
                 )
@@ -142,3 +144,164 @@ class TestFst:
             pytest.skip("No directories in FST")
         with pytest.raises(IsADirectoryError):
             partition.read_file(dir_node)
+
+
+# ---------------------------------------------------------------------------
+# FileReader — seeking and partial reads
+# ---------------------------------------------------------------------------
+
+
+def _file_with_min_size(fst: nod.Fst, min_size: int) -> nod.FstNode:
+    """Return the smallest file that is at least *min_size* bytes, or skip."""
+    candidates = sorted(
+        (n for n in fst if n.is_file and n.length >= min_size),
+        key=lambda n: n.length,
+    )
+    if not candidates:
+        pytest.skip(f"No file with at least {min_size} bytes in FST")
+    return candidates[0]
+
+
+class TestFileReader:
+    def test_size_matches_fst_node(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 1)
+        f = partition.read_file(node)
+        assert f.size() == node.length
+
+    def test_tell_starts_at_zero(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 1)
+        f = partition.read_file(node)
+        assert f.tell() == 0
+
+    def test_tell_advances_after_read(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 4)
+        f = partition.read_file(node)
+        f.read(4)
+        assert f.tell() == 4
+
+    def test_read_all_matches_size(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 1)
+        data = partition.read_file(node).read()
+        assert len(data) == node.length
+
+    def test_read_zero_bytes(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 1)
+        data = partition.read_file(node).read(0)
+        assert data == b""
+
+    def test_partial_read_returns_correct_count(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 8)
+        f = partition.read_file(node)
+        chunk = f.read(4)
+        assert len(chunk) == 4
+
+    def test_two_partial_reads_concatenate_to_full(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 8)
+        f = partition.read_file(node)
+        half = node.length // 2
+        a = f.read(half)
+        b = f.read()
+        full = partition.read_file(node).read()
+        assert a + b == full
+
+    def test_read_past_eof_returns_remaining(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 1)
+        f = partition.read_file(node)
+        data = f.read(node.length + 1024)
+        assert len(data) == node.length
+
+    def test_read_after_eof_returns_empty(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 1)
+        f = partition.read_file(node)
+        f.read()
+        assert f.read() == b""
+        assert f.read(16) == b""
+
+    def test_seek_from_start(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 8)
+        f = partition.read_file(node)
+        pos = f.seek(4)
+        assert pos == 4
+        assert f.tell() == 4
+
+    def test_seek_from_current(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 8)
+        f = partition.read_file(node)
+        f.seek(4)
+        pos = f.seek(2, 1)
+        assert pos == 6
+
+    def test_seek_from_end(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 4)
+        f = partition.read_file(node)
+        pos = f.seek(-4, 2)
+        assert pos == node.length - 4
+
+    def test_seek_to_start_rereads_same_data(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 4)
+        f = partition.read_file(node)
+        first = f.read(4)
+        f.seek(0)
+        second = f.read(4)
+        assert first == second
+
+    def test_seek_and_read_middle(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 8)
+        f = partition.read_file(node)
+        full = f.read()
+        f.seek(4)
+        chunk = f.read(4)
+        assert chunk == full[4:8]
+
+    def test_multiple_readers_independent(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        # Two FileReaders on the same node must not interfere with each other.
+        node = _file_with_min_size(fst, 8)
+        f1 = partition.read_file(node)
+        f2 = partition.read_file(node)
+        first4_f1 = f1.read(4)
+        first4_f2 = f2.read(4)
+        assert first4_f1 == first4_f2
+        # f2 still at position 4 regardless of what f1 does
+        f1.read()
+        next4_f2 = f2.read(4)
+        full = partition.read_file(node).read()
+        assert next4_f2 == full[4:8]
+
+    def test_context_manager_closes(self, partition: nod.PartitionReader, fst: nod.Fst):
+        node = _file_with_min_size(fst, 1)
+        with partition.read_file(node) as f:
+            assert not f.closed
+            f.read(1)
+        assert f.closed
+
+    def test_read_after_close_raises(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 1)
+        f = partition.read_file(node)
+        f.close()
+        with pytest.raises(ValueError, match="closed"):
+            f.read()
+
+    def test_seek_after_close_raises(
+        self, partition: nod.PartitionReader, fst: nod.Fst
+    ):
+        node = _file_with_min_size(fst, 1)
+        f = partition.read_file(node)
+        f.close()
+        with pytest.raises(ValueError, match="closed"):
+            f.seek(0)

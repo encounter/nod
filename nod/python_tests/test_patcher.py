@@ -219,14 +219,14 @@ class TestDiscPatcherFileIntegrity:
 
     def test_unmodified_file_matches_original(self, disc: nod.DiscReader):
         partition, node = self._smallest_file(disc)
-        original_data = partition.read_file(node)
+        original_data = partition.read_file(node).read()
 
         patched = nod.DiscPatcher(disc).build()
         patched_partition = patched.open_partition_kind("Data")
         patched_meta = patched_partition.meta()
         patched_node = patched_meta.fst().find("/" + node.path)
         assert patched_node is not None, f"File {node.path} missing from patched FST"
-        patched_data = patched_partition.read_file(patched_node)
+        patched_data = patched_partition.read_file(patched_node).read()
         assert patched_data == original_data
 
     def test_replaced_file_has_new_data(self, disc: nod.DiscReader):
@@ -241,7 +241,7 @@ class TestDiscPatcherFileIntegrity:
         patched_node = patched_partition.meta().fst().find("/" + node.path)
         assert patched_node is not None
         assert patched_node.length == len(new_data)
-        assert patched_partition.read_file(patched_node) == new_data
+        assert patched_partition.read_file(patched_node).read() == new_data
 
     def test_replaced_file_different_size(self, disc: nod.DiscReader):
         _, node = self._smallest_file(disc)
@@ -256,7 +256,7 @@ class TestDiscPatcherFileIntegrity:
         patched_node = patched_partition.meta().fst().find("/" + node.path)
         assert patched_node is not None
         assert patched_node.length == 256
-        assert patched_partition.read_file(patched_node) == new_data
+        assert patched_partition.read_file(patched_node).read() == new_data
 
     def test_other_files_unchanged_when_one_replaced(self, disc: nod.DiscReader):
         partition = disc.open_partition_kind("Data")
@@ -270,7 +270,7 @@ class TestDiscPatcherFileIntegrity:
 
         target = files[0]
         bystander = files[1]
-        original_bystander_data = partition.read_file(bystander)
+        original_bystander_data = partition.read_file(bystander).read()
 
         patcher = nod.DiscPatcher(disc)
         patcher.add_file(target.path, b"new content")
@@ -279,7 +279,8 @@ class TestDiscPatcherFileIntegrity:
         patched_partition = patched.open_partition_kind("Data")
         patched_bystander = patched_partition.meta().fst().find("/" + bystander.path)
         assert patched_bystander is not None
-        assert patched_partition.read_file(patched_bystander) == original_bystander_data
+        result = patched_partition.read_file(patched_bystander).read()
+        assert result == original_bystander_data
 
     def test_add_new_file_appears_in_fst(self, disc: nod.DiscReader):
         new_path = "files/__patcher_new_file__.bin"
@@ -293,7 +294,7 @@ class TestDiscPatcherFileIntegrity:
         node = patched_partition.meta().fst().find("/" + new_path)
         assert node is not None, f"{new_path} not found in patched FST"
         assert node.length == len(new_data)
-        assert patched_partition.read_file(node) == new_data
+        assert patched_partition.read_file(node).read() == new_data
 
     def test_all_original_files_present_after_unmodified_build(
         self, disc: nod.DiscReader
@@ -338,7 +339,7 @@ class TestDiscPatcherWriterRoundtrip:
         repart = reopened.open_partition_kind("Data")
         renode = repart.meta().fst().find("/" + node.path)
         assert renode is not None
-        assert repart.read_file(renode) == new_data
+        assert repart.read_file(renode).read() == new_data
 
 
 # ---------------------------------------------------------------------------

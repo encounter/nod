@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from collections.abc import Callable
+from types import TracebackType
 
 class DiscHeader:
     """Primary disc header (boot.bin offset 0x000)."""
@@ -53,6 +56,57 @@ class PartitionInfo:
     kind: str
     """Partition kind: ``"Data"``, ``"Update"``, ``"Channel"``, or ``"Other (…)"``."""
 
+    def __repr__(self) -> str: ...
+
+class FileReader:
+    """Lazy, seekable binary file reader backed by a disc partition.
+
+    Returned by :meth:`PartitionReader.read_file`. Data is read from the
+    source disc on demand — nothing is buffered until you call :meth:`read`.
+
+    Implements the standard binary-IO interface and can be used as a context
+    manager::
+
+        with partition.read_file(node) as f:
+            header = f.read(4)
+            f.seek(0)
+            all_data = f.read()
+    """
+
+    def read(self, size: int = -1) -> bytes:
+        """Read and return up to *size* bytes.
+
+        If *size* is ``-1`` (default), reads until end of file.
+        """
+
+    def seek(self, pos: int, whence: int = 0) -> int:
+        """Seek to *pos* bytes relative to *whence*.
+
+        *whence*: ``0`` = start (default), ``1`` = current position,
+        ``2`` = end of file. Returns the new absolute position.
+        """
+
+    def tell(self) -> int:
+        """Return the current stream position."""
+
+    def size(self) -> int:
+        """Return the total file size in bytes."""
+
+    def readable(self) -> bool: ...
+    def seekable(self) -> bool: ...
+    def writable(self) -> bool: ...
+
+    @property
+    def closed(self) -> bool: ...
+    def close(self) -> None: ...
+
+    def __enter__(self) -> FileReader: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
     def __repr__(self) -> str: ...
 
 class FstNode:
@@ -134,8 +188,12 @@ class PartitionReader:
     def meta(self) -> PartitionMeta:
         """Read the partition header and file system metadata."""
 
-    def read_file(self, node: FstNode) -> bytes:
-        """Read the full contents of a file identified by *node*.
+    def read_file(self, node: FstNode) -> FileReader:
+        """Open a file identified by *node* for lazy on-demand reading.
+
+        Returns a :class:`FileReader` positioned at the start of the file.
+        Data is read from the source disc only when you call
+        :meth:`FileReader.read`.
 
         Raises :exc:`IsADirectoryError` if *node* is a directory.
         """
