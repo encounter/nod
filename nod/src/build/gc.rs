@@ -194,7 +194,10 @@ impl GCPartitionLayout {
                     )));
                 }
                 self.disc_header.as_mut_bytes().copy_from_slice(&data[..size_of::<DiscHeader>()]);
-                self.boot_header.as_mut_bytes().copy_from_slice(&data[BB2_OFFSET..BB2_OFFSET + size_of::<BootHeader>()]);
+                self.boot_header
+                    .as_mut_bytes()
+                    .copy_from_slice(&data[BB2_OFFSET..BB2_OFFSET + size_of::<BootHeader>()]);
+
                 *handled = true;
                 continue;
             }
@@ -450,8 +453,11 @@ impl GCPartitionLayout {
         boot[..size_of::<DiscHeader>()].copy_from_slice(self.disc_header.as_bytes());
         boot[BB2_OFFSET..BB2_OFFSET + size_of::<BootHeader>()]
             .copy_from_slice(self.boot_header.as_bytes());
-        write_info[boot_write_info_idx] =
-            WriteInfo { kind: WriteKind::Static(Arc::from(boot), "[BOOT]"), size: BOOT_SIZE as u64, offset: 0 };
+        write_info[boot_write_info_idx] = WriteInfo {
+            kind: WriteKind::Static(Arc::from(boot), "[BOOT]"),
+            size: BOOT_SIZE as u64,
+            offset: 0,
+        };
 
         if dol_offset < fst_offset {
             write_info.push(WriteInfo {
