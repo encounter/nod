@@ -72,6 +72,85 @@ class TestDiscPatcherAddFile:
 
 
 # ---------------------------------------------------------------------------
+# set_dol()
+# ---------------------------------------------------------------------------
+
+
+_DOL_HEADER_SIZE = 0x100  # DOL header is always 256 bytes
+
+
+def _modified_dol(original: bytes, fill: int = 0xDD) -> bytes:
+    """Return a DOL with the same header as *original* but body bytes replaced.
+
+    The header encodes section offsets and sizes, so keeping it intact lets
+    the partition reader parse the DOL correctly while the content differs.
+    """
+    if len(original) <= _DOL_HEADER_SIZE:
+        pytest.skip("DOL too small to modify body")
+    body_size = len(original) - _DOL_HEADER_SIZE
+    return original[:_DOL_HEADER_SIZE] + bytes([fill]) * body_size
+
+
+class TestDiscPatcherSetDol:
+    def _original_dol(self, disc: nod.DiscReader) -> bytes:
+        return disc.open_partition_kind("Data").meta().raw_dol
+
+    def test_set_dol_changes_raw_dol(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        new_dol = _modified_dol(original, fill=0xAA)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(new_dol)
+        patched = patcher.build()
+
+        result = patched.open_partition_kind("Data").meta().raw_dol
+        assert result == new_dol
+        assert result != original
+
+    def test_no_set_dol_preserves_original(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        patched = nod.DiscPatcher(disc).build()
+        result = patched.open_partition_kind("Data").meta().raw_dol
+        assert result == original
+
+    def test_set_dol_twice_uses_last(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        first = _modified_dol(original, fill=0xAA)
+        second = _modified_dol(original, fill=0xBB)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(first)
+        patcher.set_dol(second)
+        patched = patcher.build()
+
+        result = patched.open_partition_kind("Data").meta().raw_dol
+        assert result == second
+
+    def test_set_dol_combined_with_file_patch(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        new_dol = _modified_dol(original, fill=0xCC)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(new_dol)
+        patcher.add_file("files/__dol_test__.bin", b"alongside dol")
+        patched = patcher.build()
+
+        assert patched.open_partition_kind("Data").meta().raw_dol == new_dol
+        fst = patched.open_partition_kind("Data").meta().fst()
+        assert fst.find("/files/__dol_test__.bin") is not None
+
+    def test_set_dol_idempotent_builds(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        new_dol = _modified_dol(original, fill=0xDD)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(new_dol)
+        r1 = patcher.build().open_partition_kind("Data").meta().raw_dol
+        r2 = patcher.build().open_partition_kind("Data").meta().raw_dol
+        assert r1 == r2 == new_dol
+
+
+# ---------------------------------------------------------------------------
 # set_header() — validation
 # ---------------------------------------------------------------------------
 

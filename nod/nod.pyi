@@ -368,6 +368,13 @@ class DiscPatcher:
         Raises :exc:`ValueError` if *disc* is a Wii disc.
         """
 
+    def set_dol(self, data: bytes) -> None:
+        """Replace the main executable (DOL) in the patched disc.
+
+        *data* must be a valid DOL binary. Calling this a second time
+        replaces the previous override.
+        """
+
     def add_file(self, path: str, data: bytes) -> None:
         """Add a new file or replace an existing one.
 

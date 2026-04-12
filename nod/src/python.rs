@@ -883,6 +883,7 @@ pub struct PyDiscPatcher {
     disc: Arc<Mutex<NodDiscReader>>,
     overrides: HashMap<String, Arc<[u8]>>,
     header_overrides: crate::build::gc::PartitionOverrides,
+    dol_override: Option<Arc<[u8]>>,
 }
 
 #[pymethods]
@@ -904,6 +905,7 @@ impl PyDiscPatcher {
             disc: Arc::clone(&disc.inner),
             overrides: HashMap::new(),
             header_overrides: crate::build::gc::PartitionOverrides::default(),
+            dol_override: None,
         })
     }
 
@@ -923,6 +925,14 @@ impl PyDiscPatcher {
         }
         self.overrides.insert(path, Arc::from(data));
         Ok(())
+    }
+
+    /// Replace the main executable (DOL) in the patched disc.
+    ///
+    /// *data* must be a valid DOL binary. Calling this a second time
+    /// replaces the previous override.
+    fn set_dol(&mut self, data: &[u8]) {
+        self.dol_override = Some(Arc::from(data));
     }
 
     /// Override disc header fields in the patched disc.
@@ -1069,15 +1079,19 @@ impl PyDiscPatcher {
 
         // main.dol: always placed after the apploader by the builder because
         // we zeroed dol_offset above.
+        let dol_data: Arc<[u8]> = self
+            .dol_override
+            .clone()
+            .unwrap_or_else(|| Arc::from(meta.raw_dol.as_ref()));
         builder
             .add_file(FileInfo {
                 name: "sys/main.dol".to_string(),
-                size: meta.raw_dol.len() as u64,
+                size: dol_data.len() as u64,
                 offset: None,
                 alignment: Some(128),
             })
             .map_err(nod_err)?;
-        file_map.insert("sys/main.dol".to_string(), Arc::from(meta.raw_dol.as_ref()));
+        file_map.insert("sys/main.dol".to_string(), dol_data);
 
         // ---- User files from the original FST ----------------------------
         let fst = Fst::new(&meta.raw_fst)
