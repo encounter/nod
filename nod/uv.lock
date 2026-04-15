@@ -33,7 +33,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nod"
+name = "nod-rs"
 source = { editable = "." }
 
 [package.dev-dependencies]
