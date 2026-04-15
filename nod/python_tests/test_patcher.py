@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-import nod
+import nod_rs as nod
 
 # ---------------------------------------------------------------------------
 # Construction / validation

@@ -1,6 +1,6 @@
 import pytest
 
-import nod
+import nod_rs as nod
 
 
 class TestPartitionReader:

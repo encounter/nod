@@ -3,7 +3,7 @@ requires = ["maturin>=1.8,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "nod"
+name = "nod-rs"
 description = "Python bindings for the nod GameCube/Wii disc image library"
 authors = [
     { name = "Luke Street", email = "luke@street.dev" },
@@ -34,6 +34,7 @@ testpaths = ["python_tests"]
 [tool.maturin]
 features = ["python"]
 python-versions = ">=3.10"
+module-name = "nod_rs"
 
 
 [tool.ruff.lint]

@@ -210,9 +210,9 @@ class DiscReader:
 
     Example::
 
-        import nod
+        import nod_rs
 
-        disc = nod.DiscReader("game.iso")
+        disc = nod_rs.DiscReader("game.iso")
         partition = disc.open_partition_kind("Data")
         meta = partition.meta()
         fst = meta.fst()
@@ -287,8 +287,8 @@ class DiscWriter:
 
     Construct by passing a :class:`DiscReader` and target format::
 
-        disc = nod.DiscReader("game.rvz")
-        writer = nod.DiscWriter(disc, "ISO")
+        disc = nod_rs.DiscReader("game.rvz")
+        writer = nod_rs.DiscWriter(disc, "ISO")
         fin = writer.process("output.iso", digest_crc32=True)
         print(f"CRC32: {fin.crc32:#010x}")
     """
@@ -354,12 +354,12 @@ class DiscPatcher:
 
     Example::
 
-        disc = nod.DiscReader("original.iso")
-        patcher = nod.DiscPatcher(disc)
+        disc = nod_rs.DiscReader("original.iso")
+        patcher = nod_rs.DiscPatcher(disc)
         with open("new_audio.dsp", "rb") as f:
             patcher.add_file("files/audio/bgm.dsp", f.read())
         patched = patcher.build()
-        nod.DiscWriter(patched, "ISO").process("patched.iso")
+        nod_rs.DiscWriter(patched, "ISO").process("patched.iso")
     """
 
     def __init__(self, disc: DiscReader) -> None:

@@ -1,6 +1,6 @@
 import pytest
 
-import nod
+import nod_rs as nod
 
 
 def test_open_nonexistent():

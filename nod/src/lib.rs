@@ -164,7 +164,7 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
 #[pymodule]
-fn nod(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn nod_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     python::register(m)
 }
 

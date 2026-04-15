@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-import nod
+import nod_rs as nod
 
 
 def pytest_configure(config: pytest.Config) -> None:
