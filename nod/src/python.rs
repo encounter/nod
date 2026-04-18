@@ -1002,7 +1002,7 @@ impl PyDiscPatcher {
     /// Raises :exc:`OSError` if the source disc cannot be read.
     /// Raises :exc:`RuntimeError` if the disc layout is invalid.
     fn build(&self) -> PyResult<PyDiscReader> {
-        use crate::build::gc::{FileInfo, GCPartitionBuilder, PartitionOverrides};
+        use crate::build::gc::{FileInfo, GCPartitionBuilder};
         use crate::disc::{BB2_OFFSET, BI2_SIZE, BOOT_SIZE};
         use crate::disc::fst::Fst;
 
