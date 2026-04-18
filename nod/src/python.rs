@@ -1,23 +1,30 @@
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, BufWriter, Read as IoRead, Seek, SeekFrom, Write};
-use std::sync::{Arc, Mutex};
-
-use crate::common::{Compression, Format, PartitionKind as NodPartitionKind};
-use crate::disc::DiscHeader as NodDiscHeader;
-use crate::disc::fst::Node;
-use crate::read::{
-    DiscMeta as NodDiscMeta, DiscOptions, DiscReader as NodDiscReader, PartitionMeta,
-    PartitionOptions, PartitionReader,
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, BufWriter, Read as IoRead, Seek, SeekFrom, Write},
+    sync::{Arc, Mutex},
 };
-use crate::write::{DiscWriter as NodDiscWriter, FormatOptions, ProcessOptions, ScrubLevel};
-use pyo3::exceptions::{PyIOError, PyRuntimeError, PyValueError};
-use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+
+use pyo3::{
+    exceptions::{PyIOError, PyRuntimeError, PyValueError},
+    prelude::*,
+    types::PyBytes,
+};
+
+use crate::{
+    common::{Compression, Format, PartitionKind as NodPartitionKind},
+    disc::{DiscHeader as NodDiscHeader, fst::Node},
+    read::{
+        DiscMeta as NodDiscMeta, DiscOptions, DiscReader as NodDiscReader, PartitionMeta,
+        PartitionOptions, PartitionReader,
+    },
+    write::{DiscWriter as NodDiscWriter, FormatOptions, ProcessOptions, ScrubLevel},
+};
 
 fn nod_err(e: crate::Error) -> PyErr {
-    use pyo3::exceptions::PyFileNotFoundError;
     use std::io::ErrorKind;
+
+    use pyo3::exceptions::PyFileNotFoundError;
     match &e {
         crate::Error::Io(_, io_err) if io_err.kind() == ErrorKind::NotFound => {
             PyFileNotFoundError::new_err(format!("{e}"))
@@ -26,9 +33,7 @@ fn nod_err(e: crate::Error) -> PyErr {
     }
 }
 
-fn io_err(e: std::io::Error) -> PyErr {
-    PyIOError::new_err(format!("{e}"))
-}
+fn io_err(e: std::io::Error) -> PyErr { PyIOError::new_err(format!("{e}")) }
 
 // ---------------------------------------------------------------------------
 // DiscHeader
@@ -196,9 +201,7 @@ pub struct PyFstIter {
 
 #[pymethods]
 impl PyFstIter {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> { slf }
 
     fn __next__(&mut self) -> Option<PyFstNode> {
         if self.index < self.entries.len() {
@@ -264,9 +267,7 @@ impl PyFst {
         Ok(PyFstIter { entries, index: 0 })
     }
 
-    fn __repr__(&self) -> String {
-        "Fst(...)".to_string()
-    }
+    fn __repr__(&self) -> String { "Fst(...)".to_string() }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,9 +282,7 @@ pub struct PyPartitionMeta {
 #[pymethods]
 impl PyPartitionMeta {
     /// Returns the file system table.
-    fn fst(&self) -> PyResult<PyFst> {
-        Ok(PyFst { raw_fst: Arc::clone(&self.inner.raw_fst) })
-    }
+    fn fst(&self) -> PyResult<PyFst> { Ok(PyFst { raw_fst: Arc::clone(&self.inner.raw_fst) }) }
 
     /// Disc and boot header (boot.bin, 0x440 bytes).
     #[getter]
@@ -340,13 +339,9 @@ impl PyPartitionMeta {
     }
 
     /// Disc header information parsed from boot.bin.
-    fn disc_header(&self) -> PyDiscHeader {
-        from_disc_header(self.inner.disc_header())
-    }
+    fn disc_header(&self) -> PyDiscHeader { from_disc_header(self.inner.disc_header()) }
 
-    fn __repr__(&self) -> String {
-        "PartitionMeta(...)".to_string()
-    }
+    fn __repr__(&self) -> String { "PartitionMeta(...)".to_string() }
 }
 
 // ---------------------------------------------------------------------------
@@ -424,7 +419,9 @@ impl PyFileReader {
     fn size(&self) -> u64 { self.file_size }
 
     fn readable(&self) -> bool { true }
+
     fn seekable(&self) -> bool { true }
+
     fn writable(&self) -> bool { false }
 
     #[getter]
@@ -471,9 +468,7 @@ pub struct PyPartitionReader {
 #[pymethods]
 impl PyPartitionReader {
     /// Returns `True` for Wii partitions, `False` for GameCube.
-    fn is_wii(&self) -> bool {
-        self.inner.lock().unwrap().is_wii()
-    }
+    fn is_wii(&self) -> bool { self.inner.lock().unwrap().is_wii() }
 
     /// Reads the partition header and file system metadata.
     fn meta(&self) -> PyResult<PyPartitionMeta> {
@@ -507,9 +502,7 @@ impl PyPartitionReader {
         })
     }
 
-    fn __repr__(&self) -> String {
-        format!("PartitionReader(is_wii={})", self.is_wii())
-    }
+    fn __repr__(&self) -> String { format!("PartitionReader(is_wii={})", self.is_wii()) }
 }
 
 // ---------------------------------------------------------------------------
@@ -548,9 +541,7 @@ impl PyDiscReader {
     }
 
     /// Returns the disc's size in bytes.
-    fn disc_size(&self) -> u64 {
-        self.inner.lock().unwrap().disc_size()
-    }
+    fn disc_size(&self) -> u64 { self.inner.lock().unwrap().disc_size() }
 
     /// Returns a list of Wii partitions. Empty for GameCube discs.
     fn partitions(&self) -> Vec<PyPartitionInfo> {
@@ -558,21 +549,14 @@ impl PyDiscReader {
         guard
             .partitions()
             .iter()
-            .map(|p| PyPartitionInfo {
-                index: p.index,
-                kind: p.kind.to_string(),
-            })
+            .map(|p| PyPartitionInfo { index: p.index, kind: p.kind.to_string() })
             .collect()
     }
 
     /// Opens a partition by index.
     /// For GameCube discs, `index` must be 0.
     #[pyo3(signature = (index, validate_hashes=false))]
-    fn open_partition(
-        &self,
-        index: usize,
-        validate_hashes: bool,
-    ) -> PyResult<PyPartitionReader> {
+    fn open_partition(&self, index: usize, validate_hashes: bool) -> PyResult<PyPartitionReader> {
         let options = PartitionOptions { validate_hashes };
         let reader = self.inner.lock().unwrap().open_partition(index, &options).map_err(nod_err)?;
         Ok(PyPartitionReader { inner: Arc::new(Mutex::new(reader)) })
@@ -611,11 +595,7 @@ impl PyDiscReader {
     fn __repr__(&self) -> String {
         let guard = self.inner.lock().unwrap();
         let h = guard.header();
-        format!(
-            "DiscReader(game_id={:?}, game_title={:?})",
-            h.game_id_str(),
-            h.game_title_str()
-        )
+        format!("DiscReader(game_id={:?}, game_title={:?})", h.game_id_str(), h.game_title_str())
     }
 }
 
@@ -650,15 +630,10 @@ impl PyDiscFinalization {
 
     /// Header data that must be written to the start of the output file, if non-empty.
     #[getter]
-    fn header<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.header)
-    }
+    fn header<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> { PyBytes::new(py, &self.header) }
 
     fn __repr__(&self) -> String {
-        format!(
-            "DiscFinalization(crc32={:?}, xxh64={:?})",
-            self.crc32, self.xxh64
-        )
+        format!("DiscFinalization(crc32={:?}, xxh64={:?})", self.crc32, self.xxh64)
     }
 }
 
@@ -731,9 +706,7 @@ impl PyDiscWriter {
 
     /// Returns the progress upper bound. Can be used to display progress from the *progress*
     /// argument of the callback passed to :meth:`process`.
-    fn progress_bound(&self) -> u64 {
-        self.inner.lock().unwrap().0.progress_bound()
-    }
+    fn progress_bound(&self) -> u64 { self.inner.lock().unwrap().0.progress_bound() }
 
     /// Processes the disc and writes the result to *output_path*.
     ///
@@ -811,17 +784,10 @@ impl PyDiscWriter {
             let mut guard = file.lock().unwrap();
             guard.flush().map_err(|e| PyIOError::new_err(format!("{e}")))?;
             let inner = guard.get_mut();
-            inner
-                .seek(SeekFrom::Start(0))
-                .map_err(|e| PyIOError::new_err(format!("{e}")))?;
-            inner
-                .write_all(&fin.header)
-                .map_err(|e| PyIOError::new_err(format!("{e}")))?;
+            inner.seek(SeekFrom::Start(0)).map_err(|e| PyIOError::new_err(format!("{e}")))?;
+            inner.write_all(&fin.header).map_err(|e| PyIOError::new_err(format!("{e}")))?;
         } else {
-            file.lock()
-                .unwrap()
-                .flush()
-                .map_err(|e| PyIOError::new_err(format!("{e}")))?;
+            file.lock().unwrap().flush().map_err(|e| PyIOError::new_err(format!("{e}")))?;
         }
 
         Ok(PyDiscFinalization {
@@ -858,7 +824,10 @@ impl crate::build::gc::FileCallback for PatcherCallback {
         out.copy_from_slice(data.get(start..end).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::UnexpectedEof,
-                format!("DiscPatcher: {name}: read {start}..{end} out of bounds (size {})", data.len()),
+                format!(
+                    "DiscPatcher: {name}: read {start}..{end} out of bounds (size {})",
+                    data.len()
+                ),
             )
         })?);
         Ok(())
@@ -919,9 +888,7 @@ impl PyDiscPatcher {
     fn add_file(&mut self, path: &str, data: &[u8]) -> PyResult<()> {
         let path = path.trim_start_matches('/').to_string();
         if path.starts_with("sys/") {
-            return Err(PyValueError::new_err(
-                "Cannot override system files (sys/) via add_file",
-            ));
+            return Err(PyValueError::new_err("Cannot override system files (sys/) via add_file"));
         }
         self.overrides.insert(path, Arc::from(data));
         Ok(())
@@ -931,9 +898,7 @@ impl PyDiscPatcher {
     ///
     /// *data* must be a valid DOL binary. Calling this a second time
     /// replaces the previous override.
-    fn set_dol(&mut self, data: &[u8]) {
-        self.dol_override = Some(Arc::from(data));
-    }
+    fn set_dol(&mut self, data: &[u8]) { self.dol_override = Some(Arc::from(data)); }
 
     /// Override disc header fields in the patched disc.
     ///
@@ -1002,9 +967,10 @@ impl PyDiscPatcher {
     /// Raises :exc:`OSError` if the source disc cannot be read.
     /// Raises :exc:`RuntimeError` if the disc layout is invalid.
     fn build(&self) -> PyResult<PyDiscReader> {
-        use crate::build::gc::{FileInfo, GCPartitionBuilder};
-        use crate::disc::{BB2_OFFSET, BI2_SIZE, BOOT_SIZE};
-        use crate::disc::fst::Fst;
+        use crate::{
+            build::gc::{FileInfo, GCPartitionBuilder},
+            disc::{BB2_OFFSET, BI2_SIZE, BOOT_SIZE, fst::Fst},
+        };
 
         // Open the data partition (index 0 on GameCube).
         let (meta, mut partition) = {
@@ -1072,17 +1038,12 @@ impl PyDiscPatcher {
                 alignment: None,
             })
             .map_err(nod_err)?;
-        file_map.insert(
-            "sys/apploader.img".to_string(),
-            Arc::from(meta.raw_apploader.as_ref()),
-        );
+        file_map.insert("sys/apploader.img".to_string(), Arc::from(meta.raw_apploader.as_ref()));
 
         // main.dol: always placed after the apploader by the builder because
         // we zeroed dol_offset above.
-        let dol_data: Arc<[u8]> = self
-            .dol_override
-            .clone()
-            .unwrap_or_else(|| Arc::from(meta.raw_dol.as_ref()));
+        let dol_data: Arc<[u8]> =
+            self.dol_override.clone().unwrap_or_else(|| Arc::from(meta.raw_dol.as_ref()));
         builder
             .add_file(FileInfo {
                 name: "sys/main.dol".to_string(),
@@ -1163,15 +1124,12 @@ impl PyDiscPatcher {
 
         let callback = PatcherCallback { files: file_map };
         let stream = partition_writer.into_cloneable_stream(callback).map_err(nod_err)?;
-        let reader =
-            NodDiscReader::new_stream(stream, &DiscOptions::default()).map_err(nod_err)?;
+        let reader = NodDiscReader::new_stream(stream, &DiscOptions::default()).map_err(nod_err)?;
 
         Ok(PyDiscReader { inner: Arc::new(Mutex::new(reader)) })
     }
 
-    fn __repr__(&self) -> String {
-        format!("DiscPatcher(overrides={})", self.overrides.len())
-    }
+    fn __repr__(&self) -> String { format!("DiscPatcher(overrides={})", self.overrides.len()) }
 }
 
 // ---------------------------------------------------------------------------
