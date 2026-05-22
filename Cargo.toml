@@ -23,3 +23,7 @@ md-5 = { version = "0.11.0-rc.5", default-features = false }
 sha1 = { version = "0.11.0-rc.5", default-features = false }
 tracing = "0.1"
 zerocopy = { version = "0.8", features = ["alloc", "derive"] }
+
+# We only need the vendored sources archive for aarch64/x86_64 Linux
+[workspace.metadata.vendor-filter]
+platforms = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
