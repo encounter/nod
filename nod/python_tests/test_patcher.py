@@ -1,0 +1,438 @@
+from pathlib import Path
+
+import pytest
+
+import nod_rs as nod
+
+# ---------------------------------------------------------------------------
+# Construction / validation
+# ---------------------------------------------------------------------------
+
+
+class TestDiscPatcherConstruct:
+    def test_create(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        assert patcher is not None
+
+    def test_repr_empty(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        r = repr(patcher)
+        assert "DiscPatcher" in r
+        assert "0" in r
+
+    def test_repr_after_add(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file("files/test.bin", b"x")
+        assert "1" in repr(patcher)
+        patcher.add_file("files/test2.bin", b"y")
+        assert "2" in repr(patcher)
+
+    def test_wii_disc_raises(self, wii_disc: nod.DiscReader):
+        with pytest.raises(ValueError, match=r"(?i)wii"):
+            nod.DiscPatcher(wii_disc)
+
+
+# ---------------------------------------------------------------------------
+# add_file validation
+# ---------------------------------------------------------------------------
+
+
+class TestDiscPatcherAddFile:
+    def test_sys_boot_raises(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        with pytest.raises(ValueError, match="sys/"):
+            patcher.add_file("sys/boot.bin", b"data")
+
+    def test_sys_dol_raises(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        with pytest.raises(ValueError, match="sys/"):
+            patcher.add_file("sys/main.dol", b"data")
+
+    def test_sys_with_leading_slash_raises(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        with pytest.raises(ValueError, match="sys/"):
+            patcher.add_file("/sys/apploader.img", b"data")
+
+    def test_normal_path_succeeds(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file("files/new.bin", b"hello")  # must not raise
+
+    def test_leading_slash_stripped(self, disc: nod.DiscReader):
+        # /files/x and files/x should count as the same key
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file("/files/dupe.bin", b"first")
+        patcher.add_file("files/dupe.bin", b"second")
+        assert "1" in repr(patcher)  # only one entry
+
+    def test_override_same_path(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file("files/x.bin", b"v1")
+        patcher.add_file("files/x.bin", b"v2")
+        assert "1" in repr(patcher)  # second call replaced first
+
+
+# ---------------------------------------------------------------------------
+# set_dol()
+# ---------------------------------------------------------------------------
+
+
+_DOL_HEADER_SIZE = 0x100  # DOL header is always 256 bytes
+
+
+def _modified_dol(original: bytes, fill: int = 0xDD) -> bytes:
+    """Return a DOL with the same header as *original* but body bytes replaced.
+
+    The header encodes section offsets and sizes, so keeping it intact lets
+    the partition reader parse the DOL correctly while the content differs.
+    """
+    if len(original) <= _DOL_HEADER_SIZE:
+        pytest.skip("DOL too small to modify body")
+    body_size = len(original) - _DOL_HEADER_SIZE
+    return original[:_DOL_HEADER_SIZE] + bytes([fill]) * body_size
+
+
+class TestDiscPatcherSetDol:
+    def _original_dol(self, disc: nod.DiscReader) -> bytes:
+        return disc.open_partition_kind("Data").meta().raw_dol
+
+    def test_set_dol_changes_raw_dol(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        new_dol = _modified_dol(original, fill=0xAA)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(new_dol)
+        patched = patcher.build()
+
+        result = patched.open_partition_kind("Data").meta().raw_dol
+        assert result == new_dol
+        assert result != original
+
+    def test_no_set_dol_preserves_original(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        patched = nod.DiscPatcher(disc).build()
+        result = patched.open_partition_kind("Data").meta().raw_dol
+        assert result == original
+
+    def test_set_dol_twice_uses_last(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        first = _modified_dol(original, fill=0xAA)
+        second = _modified_dol(original, fill=0xBB)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(first)
+        patcher.set_dol(second)
+        patched = patcher.build()
+
+        result = patched.open_partition_kind("Data").meta().raw_dol
+        assert result == second
+
+    def test_set_dol_combined_with_file_patch(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        new_dol = _modified_dol(original, fill=0xCC)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(new_dol)
+        patcher.add_file("files/__dol_test__.bin", b"alongside dol")
+        patched = patcher.build()
+
+        assert patched.open_partition_kind("Data").meta().raw_dol == new_dol
+        fst = patched.open_partition_kind("Data").meta().fst()
+        assert fst.find("/files/__dol_test__.bin") is not None
+
+    def test_set_dol_idempotent_builds(self, disc: nod.DiscReader):
+        original = self._original_dol(disc)
+        new_dol = _modified_dol(original, fill=0xDD)
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_dol(new_dol)
+        r1 = patcher.build().open_partition_kind("Data").meta().raw_dol
+        r2 = patcher.build().open_partition_kind("Data").meta().raw_dol
+        assert r1 == r2 == new_dol
+
+
+# ---------------------------------------------------------------------------
+# set_header() — validation
+# ---------------------------------------------------------------------------
+
+
+class TestDiscPatcherSetHeader:
+    def test_game_id_wrong_length_raises(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        with pytest.raises(ValueError, match="6"):
+            patcher.set_header(game_id="SHORT")
+
+    def test_game_id_too_long_raises(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        with pytest.raises(ValueError, match="6"):
+            patcher.set_header(game_id="TOOLONGID")
+
+    def test_no_args_is_noop(self, disc: nod.DiscReader):
+        # Calling set_header() with no arguments must not raise and must not
+        # change anything in the built disc.
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header()
+        patched = patcher.build()
+        assert patched.header().game_id == disc.header().game_id
+        assert patched.header().game_title == disc.header().game_title
+
+    def test_set_game_id(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="TSTID0")
+        patched = patcher.build()
+        assert patched.header().game_id == "TSTID0"
+
+    def test_set_game_title(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_title="My Patched Game")
+        patched = patcher.build()
+        assert patched.header().game_title == "My Patched Game"
+
+    def test_set_disc_num(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(disc_num=1)
+        patched = patcher.build()
+        assert patched.header().disc_num == 1
+
+    def test_set_disc_version(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(disc_version=2)
+        patched = patcher.build()
+        assert patched.header().disc_version == 2
+
+    def test_set_multiple_fields(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="MULTI0", game_title="Multi Override", disc_num=0)
+        patched = patcher.build()
+        assert patched.header().game_id == "MULTI0"
+        assert patched.header().game_title == "Multi Override"
+        assert patched.header().disc_num == 0
+
+    def test_unset_fields_preserved(self, disc: nod.DiscReader):
+        # Overriding game_id must not change game_title.
+        original_title = disc.header().game_title
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="KEEP00")
+        patched = patcher.build()
+        assert patched.header().game_title == original_title
+
+    def test_header_override_combined_with_file_patch(self, disc: nod.DiscReader):
+        # Header override and file override must both take effect.
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="COMBO0")
+        patcher.add_file("files/__combo_test__.bin", b"combo")
+        patched = patcher.build()
+        assert patched.header().game_id == "COMBO0"
+        fst = patched.open_partition_kind("Data").meta().fst()
+        node = fst.find("/files/__combo_test__.bin")
+        assert node is not None
+
+    def test_set_header_idempotent_on_multiple_builds(self, disc: nod.DiscReader):
+        patcher = nod.DiscPatcher(disc)
+        patcher.set_header(game_id="IDEM00")
+        r1 = patcher.build()
+        r2 = patcher.build()
+        assert r1.header().game_id == r2.header().game_id == "IDEM00"
+
+
+# ---------------------------------------------------------------------------
+# build() — structural checks
+# ---------------------------------------------------------------------------
+
+
+class TestDiscPatcherBuild:
+    def test_build_returns_disc_reader(self, disc: nod.DiscReader):
+        patched = nod.DiscPatcher(disc).build()
+        assert isinstance(patched, nod.DiscReader)
+
+    def test_build_preserves_game_id(self, disc: nod.DiscReader):
+        patched = nod.DiscPatcher(disc).build()
+        assert patched.header().game_id == disc.header().game_id
+
+    def test_build_preserves_game_title(self, disc: nod.DiscReader):
+        patched = nod.DiscPatcher(disc).build()
+        assert patched.header().game_title == disc.header().game_title
+
+    def test_build_is_gamecube(self, disc: nod.DiscReader):
+        patched = nod.DiscPatcher(disc).build()
+        assert patched.header().is_gamecube
+        assert not patched.header().is_wii
+
+    def test_build_partition_accessible(self, disc: nod.DiscReader):
+        patched = nod.DiscPatcher(disc).build()
+        partition = patched.open_partition_kind("Data")
+        assert partition is not None
+        assert not partition.is_wii()
+
+    def test_build_fst_non_empty(self, disc: nod.DiscReader):
+        patched = nod.DiscPatcher(disc).build()
+        fst = patched.open_partition_kind("Data").meta().fst()
+        nodes = list(fst)
+        assert len(nodes) > 0
+
+    def test_build_idempotent(self, disc: nod.DiscReader):
+        # Calling build() twice on the same patcher should produce consistent results.
+        patcher = nod.DiscPatcher(disc)
+        r1 = patcher.build()
+        r2 = patcher.build()
+        assert r1.header().game_id == r2.header().game_id
+
+
+# ---------------------------------------------------------------------------
+# build() — file content integrity
+# ---------------------------------------------------------------------------
+
+
+class TestDiscPatcherFileIntegrity:
+    def _smallest_file(
+        self, disc: nod.DiscReader
+    ) -> tuple[nod.PartitionReader, nod.FstNode]:
+        partition = disc.open_partition_kind("Data")
+        meta = partition.meta()
+        files: list[nod.FstNode] = sorted(
+            (n for n in meta.fst() if n.is_file and n.length > 0),
+            key=lambda n: n.length,
+        )
+        if not files:
+            pytest.skip("No files in FST")
+        return partition, files[0]
+
+    def test_unmodified_file_matches_original(self, disc: nod.DiscReader):
+        partition, node = self._smallest_file(disc)
+        original_data = partition.read_file(node).read()
+
+        patched = nod.DiscPatcher(disc).build()
+        patched_partition = patched.open_partition_kind("Data")
+        patched_meta = patched_partition.meta()
+        patched_node = patched_meta.fst().find("/" + node.path)
+        assert patched_node is not None, f"File {node.path} missing from patched FST"
+        patched_data = patched_partition.read_file(patched_node).read()
+        assert patched_data == original_data
+
+    def test_replaced_file_has_new_data(self, disc: nod.DiscReader):
+        _, node = self._smallest_file(disc)
+        new_data = b"REPLACED" * 16
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file(node.path, new_data)
+        patched = patcher.build()
+
+        patched_partition = patched.open_partition_kind("Data")
+        patched_node = patched_partition.meta().fst().find("/" + node.path)
+        assert patched_node is not None
+        assert patched_node.length == len(new_data)
+        assert patched_partition.read_file(patched_node).read() == new_data
+
+    def test_replaced_file_different_size(self, disc: nod.DiscReader):
+        _, node = self._smallest_file(disc)
+        # Use a size guaranteed to be different from the original (original >= 1 byte)
+        new_data = b"\xde\xad\xbe\xef" * 64  # 256 bytes
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file(node.path, new_data)
+        patched = patcher.build()
+
+        patched_partition = patched.open_partition_kind("Data")
+        patched_node = patched_partition.meta().fst().find("/" + node.path)
+        assert patched_node is not None
+        assert patched_node.length == 256
+        assert patched_partition.read_file(patched_node).read() == new_data
+
+    def test_other_files_unchanged_when_one_replaced(self, disc: nod.DiscReader):
+        partition = disc.open_partition_kind("Data")
+        meta = partition.meta()
+        files = sorted(
+            (n for n in meta.fst() if n.is_file and n.length > 0),
+            key=lambda n: n.length,
+        )
+        if len(files) < 2:
+            pytest.skip("Need at least 2 files in FST")
+
+        target = files[0]
+        bystander = files[1]
+        original_bystander_data = partition.read_file(bystander).read()
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file(target.path, b"new content")
+        patched = patcher.build()
+
+        patched_partition = patched.open_partition_kind("Data")
+        patched_bystander = patched_partition.meta().fst().find("/" + bystander.path)
+        assert patched_bystander is not None
+        result = patched_partition.read_file(patched_bystander).read()
+        assert result == original_bystander_data
+
+    def test_add_new_file_appears_in_fst(self, disc: nod.DiscReader):
+        new_path = "files/__patcher_new_file__.bin"
+        new_data = b"brand new file content"
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file(new_path, new_data)
+        patched = patcher.build()
+
+        patched_partition = patched.open_partition_kind("Data")
+        node = patched_partition.meta().fst().find("/" + new_path)
+        assert node is not None, f"{new_path} not found in patched FST"
+        assert node.length == len(new_data)
+        assert patched_partition.read_file(node).read() == new_data
+
+    def test_all_original_files_present_after_unmodified_build(
+        self, disc: nod.DiscReader
+    ):
+        partition = disc.open_partition_kind("Data")
+        original_paths = {n.path for n in partition.meta().fst() if n.is_file}
+
+        patched = nod.DiscPatcher(disc).build()
+        patched_partition = patched.open_partition_kind("Data")
+        patched_paths = {n.path for n in patched_partition.meta().fst() if n.is_file}
+
+        missing = original_paths - patched_paths
+        assert not missing, f"Files missing from patched disc: {missing}"
+
+
+# ---------------------------------------------------------------------------
+# build() → DiscWriter round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestDiscPatcherWriterRoundtrip:
+    def test_patched_disc_writeable_to_iso(self, disc: nod.DiscReader, tmp_path: Path):
+        patched = nod.DiscPatcher(disc).build()
+        out = tmp_path / "patched.iso"
+        nod.DiscWriter(patched, "ISO").process(str(out))
+        assert out.stat().st_size > 0
+
+    def test_written_iso_reopens_correctly(self, disc: nod.DiscReader, tmp_path: Path):
+        _, node = _smallest_file_in(disc)
+        new_data = b"roundtrip_check" * 8
+
+        patcher = nod.DiscPatcher(disc)
+        patcher.add_file(node.path, new_data)
+        patched = patcher.build()
+
+        out = tmp_path / "patched.iso"
+        nod.DiscWriter(patched, "ISO").process(str(out))
+
+        reopened = nod.DiscReader(str(out))
+        assert reopened.header().game_id == disc.header().game_id
+
+        repart = reopened.open_partition_kind("Data")
+        renode = repart.meta().fst().find("/" + node.path)
+        assert renode is not None
+        assert repart.read_file(renode).read() == new_data
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+
+def _smallest_file_in(disc: nod.DiscReader):
+    partition = disc.open_partition_kind("Data")
+    meta = partition.meta()
+    files = sorted(
+        (n for n in meta.fst() if n.is_file and n.length > 0),
+        key=lambda n: n.length,
+    )
+    if not files:
+        pytest.skip("No files in FST")
+    return partition, files[0]

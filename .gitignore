@@ -1,3 +1,5 @@
 /build
 /target
 .idea
+/.env
+__pycache__
