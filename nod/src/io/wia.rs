@@ -1830,6 +1830,13 @@ impl DiscWriter for DiscWriterWIA {
             }
             Cow::Owned(groups_buf)
         };
+        // RVZ can emit a groups table that compresses slightly above the initial
+        // header-sized reservation. Ensure the output buffer is large enough for
+        // the codec bound before attempting compression.
+        let groups_bound = compress_bound(self.compression, groups_data.len());
+        if compressor.buffer.capacity() < groups_bound {
+            compressor.buffer = Vec::with_capacity(groups_bound);
+        }
         if !compressor.compress(groups_data.as_ref()).context("Compressing groups")? {
             return Err(Error::Other("Failed to compress groups".to_string()));
         }
