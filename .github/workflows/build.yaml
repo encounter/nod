@@ -224,13 +224,42 @@ jobs:
         with:
           name: libnod-${{ matrix.name }}
           path: libnod-${{ matrix.name }}.tar.gz
+          archive: false
+          if-no-files-found: error
+
+  cargo-vendor:
+    name: Vendor Cargo crates
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Install cargo-vendor-filterer
+        run: cargo install --locked cargo-vendor-filterer
+      - name: Generate vendored crates archive
+        shell: bash
+        run: |
+          set -eou pipefail
+          mkdir .cargo
+          cargo vendor-filterer > .cargo/config.toml
+          find .cargo vendor -type f | tar -czvf vendored-crates.tar.zst -T -
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendored-crates.tar.zst
+          path: vendored-crates.tar.zst
+          archive: false
           if-no-files-found: error
 
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    needs: [ build, build-libs ]
+    needs: [ build, build-libs, cargo-vendor ]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -261,6 +290,11 @@ jobs:
               # .tar.gz files (lib packages) are already named correctly
               if [[ "$base" == *.tar.gz ]]; then
                 mv "$file" "../out/$base"
+                continue
+              fi
+              if [[ "$base" == *.tar.zst ]]; then
+                name="${base%%.*}"
+                mv "$file" "../out/${name}-${{github.ref_name}}.tar.zst"
                 continue
               fi
               name="${base%.*}"
