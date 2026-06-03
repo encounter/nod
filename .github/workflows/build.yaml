@@ -203,6 +203,9 @@ jobs:
           - platform: windows-latest
             name: windows-arm64
             msvc_arch: amd64_arm64
+            extra_cmake_args: >-
+              -DRust_CARGO_TARGET=aarch64-pc-windows-msvc
+              -DRust_RUSTUP_INSTALL_MISSING_TARGET:BOOL=ON
           - platform: macos-latest
             name: macos-arm64
             extra_cmake_args: >-
@@ -214,6 +217,7 @@ jobs:
               -DCMAKE_OSX_ARCHITECTURES=x86_64
               -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
               -DCMAKE_SYSTEM_PROCESSOR=x86_64
+              -DRust_CARGO_TARGET=x86_64-apple-darwin
       fail-fast: false
     runs-on: ${{ matrix.platform }}
     steps:
