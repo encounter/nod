@@ -1,5 +1,8 @@
 /build
 /target
+/vendor
 .idea
 /.env
 __pycache__
+.cargo
+*.tar.zst

@@ -9,7 +9,7 @@ lto = "fat"
 codegen-units = 1
 
 [workspace.package]
-version = "2.0.0-alpha.8"
+version = "2.0.0-alpha.10"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Luke Street <luke@street.dev>"]
@@ -23,3 +23,7 @@ md-5 = { version = "0.11.0-rc.5", default-features = false }
 sha1 = { version = "0.11.0-rc.5", default-features = false }
 tracing = "0.1"
 zerocopy = { version = "0.8", features = ["alloc", "derive"] }
+
+# We only need the vendored sources archive for aarch64/x86_64 Linux
+[workspace.metadata.vendor-filter]
+platforms = ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
