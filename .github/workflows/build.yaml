@@ -193,12 +193,27 @@ jobs:
     strategy:
       matrix:
         include:
-          - platform: ubuntu-latest
+          - platform: ubuntu-24.04
             name: linux-x86_64
+          - platform: ubuntu-24.04-arm
+            name: linux-aarch64
           - platform: windows-latest
             name: windows-x86_64
+            msvc_arch: x64
+          - platform: windows-latest
+            name: windows-arm64
+            msvc_arch: amd64_arm64
           - platform: macos-latest
             name: macos-arm64
+            extra_cmake_args: >-
+              -DCMAKE_OSX_ARCHITECTURES=arm64
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          - os: macos-latest
+            name: macos-x86_64
+            extra_cmake_args: >-
+              -DCMAKE_OSX_ARCHITECTURES=x86_64
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+              -DCMAKE_SYSTEM_PROCESSOR=x86_64
       fail-fast: false
     runs-on: ${{ matrix.platform }}
     steps:
@@ -210,7 +225,9 @@ jobs:
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
-        if: startsWith(matrix.platform, 'windows-')
+        if: runner.os == 'Windows'
+        with:
+          arch: ${{ matrix.msvc_arch }}
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
       - name: Build
