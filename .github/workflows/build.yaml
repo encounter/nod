@@ -233,7 +233,7 @@ jobs:
         with:
           arch: ${{ matrix.msvc_arch }}
       - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${{ matrix.extra_cmake_args }}
       - name: Build
         run: cmake --build build --config Release
       - name: Install
