@@ -246,7 +246,7 @@ jobs:
           set -eou pipefail
           mkdir .cargo
           cargo vendor-filterer > .cargo/config.toml
-          find .cargo vendor -type f | tar -czvf vendored-crates.tar.zst -T -
+          find .cargo vendor -type f | tar -cavf vendored-crates.tar.zst -T -
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
