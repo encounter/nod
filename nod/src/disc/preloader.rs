@@ -165,6 +165,12 @@ impl PreloaderThreads {
     }
 }
 
+/// Minimum number of sector groups to request ahead of the consumer. 16 groups is ~32 MiB,
+/// enough to ride out I/O latency spikes without stalling. More threads still deepen the
+/// window; this floor only matters when the thread count is low.
+#[cfg(feature = "threading")]
+const MIN_READ_AHEAD_GROUPS: usize = 16;
+
 struct PreloaderCache {
     #[cfg(feature = "threading")]
     inflight: HashMap<SectorGroupRequest, WaitGroup>,
@@ -182,6 +188,17 @@ impl Default for PreloaderCache {
 }
 
 impl PreloaderCache {
+    /// Size the cache to fit the read-ahead window plus some reuse room, so prefetched groups
+    /// aren't evicted before they're used. Keeps at least the old fixed capacity of 64.
+    #[cfg(feature = "threading")]
+    fn for_read_ahead(read_ahead: usize, num_threads: usize) -> Self {
+        let capacity = (read_ahead + num_threads + 16).max(64);
+        Self {
+            inflight: Default::default(),
+            lru_cache: LruCache::new(NonZeroUsize::new(capacity).unwrap()),
+        }
+    }
+
     fn push(&mut self, request: SectorGroupRequest, group: SectorGroup) {
         self.lru_cache.push(request, group);
         #[cfg(feature = "threading")]
@@ -263,7 +280,8 @@ impl Preloader {
 
         let (request_tx, request_rx) = crossbeam_channel::unbounded();
         let (stat_tx, stat_rx) = crossbeam_channel::unbounded();
-        let cache = Arc::new(Mutex::new(PreloaderCache::default()));
+        let read_ahead = num_threads.max(MIN_READ_AHEAD_GROUPS);
+        let cache = Arc::new(Mutex::new(PreloaderCache::for_read_ahead(read_ahead, num_threads)));
         let mut join_handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
             join_handles.push(preloader_thread(
@@ -310,8 +328,9 @@ impl Preloader {
                 threads_guard.join_handles.len()
             };
             let mut cache_guard = self.cache.lock().map_err(map_poisoned)?;
-            // Preload n groups ahead
-            for i in 0..num_threads as u32 {
+            // Preload read_ahead groups ahead
+            let read_ahead = num_threads.max(MIN_READ_AHEAD_GROUPS) as u32;
+            for i in 0..read_ahead {
                 let group_idx = request.group_idx + i;
                 if group_idx >= max_groups {
                     break;
