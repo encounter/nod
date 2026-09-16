@@ -200,6 +200,7 @@ if (NOD_ENABLE_INSTALL)
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodConfig.cmake.in"
         "${CMAKE_CURRENT_BINARY_DIR}/nodConfig.cmake"
         INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nod"
+        PATH_VARS CMAKE_INSTALL_LIBDIR CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR
     )
     write_basic_package_version_file(
         "${CMAKE_CURRENT_BINARY_DIR}/nodConfigVersion.cmake"

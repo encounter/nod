@@ -1,12 +1,12 @@
 @PACKAGE_INIT@
 
-set(_nod_libdir "@CMAKE_INSTALL_FULL_LIBDIR@")
-set(_nod_incdir "@CMAKE_INSTALL_FULL_INCLUDEDIR@")
+set(_nod_libdir "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+set(_nod_incdir "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 
 if (NOT TARGET nod::nod_shared AND NOT TARGET nod::nod_static)
     # Shared library
     if (WIN32)
-        set(_nod_dll "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@/${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}")
+        set(_nod_dll "@PACKAGE_CMAKE_INSTALL_BINDIR@/${CMAKE_SHARED_LIBRARY_PREFIX}nod${CMAKE_SHARED_LIBRARY_SUFFIX}")
         set(_nod_implib "${_nod_libdir}/${CMAKE_IMPORT_LIBRARY_PREFIX}nod${CMAKE_IMPORT_LIBRARY_SUFFIX}")
         if (EXISTS "${_nod_dll}")
             add_library(nod::nod_shared SHARED IMPORTED)
