@@ -165,9 +165,6 @@ impl PreloaderThreads {
     }
 }
 
-/// Minimum number of sector groups to request ahead of the consumer. 16 groups is ~32 MiB,
-/// enough to ride out I/O latency spikes without stalling. More threads still deepen the
-/// window; this floor only matters when the thread count is low.
 #[cfg(feature = "threading")]
 const MIN_READ_AHEAD_GROUPS: usize = 16;
 
@@ -188,8 +185,6 @@ impl Default for PreloaderCache {
 }
 
 impl PreloaderCache {
-    /// Size the cache to fit the read-ahead window plus some reuse room, so prefetched groups
-    /// aren't evicted before they're used. Keeps at least the old fixed capacity of 64.
     #[cfg(feature = "threading")]
     fn for_read_ahead(read_ahead: usize, num_threads: usize) -> Self {
         let capacity = (read_ahead + num_threads + 16).max(64);
