@@ -193,15 +193,15 @@ pub fn convert_and_verify(
     if let Some(crc32) = finalization.crc32 {
         if let Some(entry) = &redump_entry {
             let mut full_match = true;
-            if let Some(md5) = finalization.md5 {
-                if entry.md5 != md5 {
-                    full_match = false;
-                }
+            if let Some(md5) = finalization.md5
+                && entry.md5 != md5
+            {
+                full_match = false;
             }
-            if let Some(sha1) = finalization.sha1 {
-                if entry.sha1 != sha1 {
-                    full_match = false;
-                }
+            if let Some(sha1) = finalization.sha1
+                && entry.sha1 != sha1
+            {
+                full_match = false;
             }
             if full_match {
                 println!("Redump: {} ✅", entry.name);

@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufReader, Cursor, Write},
+    io::{BufReader, Cursor, Read, Write},
     mem::size_of,
     path::Path,
     str,
@@ -80,13 +80,19 @@ static LOADED: OnceLock<Box<[u8]>> = OnceLock::new();
 fn loaded_data() -> &'static [u8] {
     LOADED
         .get_or_init(|| {
-            let size = zstd::zstd_safe::get_frame_content_size(BUILTIN).unwrap().unwrap() as usize;
+            let structured_zstd::decoding::FrameContentSize::Known(size) =
+                structured_zstd::decoding::read_frame_content_size(BUILTIN).unwrap()
+            else {
+                panic!("Built-in database is missing its content size");
+            };
+            let size = usize::try_from(size).unwrap();
             let mut out = <[u8]>::new_box_zeroed_with_elems(size).unwrap();
-            let out_size = zstd::bulk::Decompressor::new()
-                .unwrap()
-                .decompress_to_buffer(BUILTIN, out.as_mut())
-                .unwrap();
-            debug_assert_eq!(out_size, size);
+            let mut decoder = structured_zstd::decoding::StreamingDecoder::new(BUILTIN).unwrap();
+            decoder
+                .decoder_mut()
+                .set_content_checksum(structured_zstd::decoding::ContentChecksum::Verify);
+            decoder.read_exact(&mut out).unwrap();
+            assert_eq!(decoder.read(&mut [0]).unwrap(), 0);
             out
         })
         .as_ref()
@@ -195,4 +201,20 @@ struct DatGameRom {
     md5: [u8; 16],
     #[serde(rename = "@sha1", deserialize_with = "deserialize_hex")]
     sha1: [u8; 20],
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn builtin_database_decodes_and_can_be_searched() {
+        let entries: Vec<_> = super::EntryIter::new().collect();
+        assert!(!entries.is_empty());
+        assert!(entries.windows(2).all(|pair| pair[0].crc32 <= pair[1].crc32));
+        for entry in &entries {
+            assert!(!entry.name.is_empty());
+            let found = super::find_by_crc32(entry.crc32).unwrap();
+            assert_eq!(found.md5, entry.md5);
+            assert_eq!(found.sha1, entry.sha1);
+        }
+    }
 }

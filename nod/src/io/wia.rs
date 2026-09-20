@@ -5,7 +5,6 @@ use std::{
     io::{Seek, SeekFrom},
     mem::size_of,
     sync::Arc,
-    time::Instant,
 };
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -295,7 +294,7 @@ impl WIADisc {
                     chunk_size
                 )));
             }
-        } else if chunk_size < 0x200000 || chunk_size % 0x200000 != 0 {
+        } else if chunk_size < 0x200000 || !chunk_size.is_multiple_of(0x200000) {
             return Err(Error::DiscFormat(format!("Invalid WIA chunk size: {:#X}", chunk_size)));
         }
         if self.partition_type_size.get() != size_of::<WIAPartition>() as u32 {
@@ -898,9 +897,13 @@ impl BlockReader for BlockReaderWIA {
 
         let group_data_start = group.data_offset.get() as u64 * 4;
         let mut group_data = BytesMut::zeroed(group.data_size() as usize);
-        let io_start = Instant::now();
+        #[cfg(not(target_family = "wasm"))]
+        let io_start = std::time::Instant::now();
         self.inner.read_exact_at(group_data.as_mut(), group_data_start)?;
-        let io_duration = io_start.elapsed();
+        #[cfg(not(target_family = "wasm"))]
+        let io_duration = Some(io_start.elapsed());
+        #[cfg(target_family = "wasm")]
+        let io_duration = None;
         let mut group_data = group_data.freeze();
 
         let chunk_size = self.disc.chunk_size.get();
@@ -977,7 +980,7 @@ impl BlockReader for BlockReaderWIA {
         } else {
             Block::sectors(info.sector, info.num_sectors, BlockKind::Raw)
         };
-        block.io_duration = Some(io_duration);
+        block.io_duration = io_duration;
         Ok(block)
     }
 
@@ -1208,13 +1211,11 @@ impl BlockProcessor for BlockProcessorWIA {
             rvz_packed_size: 0,
             data_hash: 0,
         };
-        if is_rvz {
-            if let Some(packed_data) = self.try_rvz_pack(group_data.as_ref(), &info) {
-                meta.data_size =
-                    (hash_exception_data.len() as u32).align_up(4) + packed_data.len() as u32;
-                meta.rvz_packed_size = packed_data.len() as u32;
-                group_data = packed_data;
-            }
+        if is_rvz && let Some(packed_data) = self.try_rvz_pack(group_data.as_ref(), &info) {
+            meta.data_size =
+                (hash_exception_data.len() as u32).align_up(4) + packed_data.len() as u32;
+            meta.rvz_packed_size = packed_data.len() as u32;
+            group_data = packed_data;
         }
 
         // Compress group
@@ -1674,8 +1675,10 @@ impl DiscWriterWIA {
             if is_rvz { size_of::<RVZGroup>() } else { size_of::<WIAGroup>() } as u32 * group_idx;
 
         header_data.put_slice(partitions.as_bytes());
-        header_data.put_bytes(0, raw_data_size as usize);
-        header_data.put_bytes(0, group_size as usize);
+        // Small metadata tables can grow during compression. Reserve space for
+        // the encoded tables before emitting any disc blocks.
+        header_data.put_bytes(0, compress_bound(options.compression, raw_data_size as usize));
+        header_data.put_bytes(0, compress_bound(options.compression, group_size as usize));
         // Group data alignment
         let rem = header_data.len() % 4;
         if rem != 0 {
@@ -1765,7 +1768,7 @@ impl DiscWriter for DiscWriterWIA {
                 junk_info: self.junk_info.clone(),
             },
             self.group_count,
-            #[cfg(feature = "threading")]
+            #[cfg(all(feature = "threading", not(target_family = "wasm")))]
             options.processor_threads,
             |group| -> Result<()> {
                 // Update hashers
@@ -1773,7 +1776,7 @@ impl DiscWriter for DiscWriterWIA {
                 digest.send(group.disc_data);
 
                 let group_idx = group.block_idx;
-                if file_position % 4 != 0 {
+                if !file_position.is_multiple_of(4) {
                     return Err(Error::Other("File position not aligned to 4".to_string()));
                 }
                 let data_offset = (file_position / 4) as u32;
@@ -1961,8 +1964,8 @@ fn compress_bound(compression: Compression, size: usize) -> usize {
     match compression {
         Compression::None => size,
         Compression::Bzip2(_) => {
-            // 1.25 * size
-            size.div_ceil(4) + size
+            // libbzip2's worst-case bound, including the stream overhead.
+            size + size.div_ceil(100) + 600
         }
         Compression::Lzma(_) => {
             // 1.1 * size + 64 KiB

@@ -149,7 +149,7 @@ fn detect_internal(data: &[u8; 0x20]) -> Option<Format> {
 }
 
 fn check_block_size(io: &dyn BlockReader) -> Result<()> {
-    if io.block_size() % SECTOR_SIZE as u32 != 0 {
+    if !io.block_size().is_multiple_of(SECTOR_SIZE as u32) {
         return Err(Error::DiscFormat(format!(
             "Block size {} is not a multiple of sector size {}",
             io.block_size(),

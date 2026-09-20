@@ -199,10 +199,10 @@ impl<'a> Fst<'a> {
                 // Skip file
                 idx += 1;
             }
-            if let Some(stop) = stop_at {
-                if idx >= stop {
-                    break;
-                }
+            if let Some(stop) = stop_at
+                && idx >= stop
+            {
+                break;
             }
         }
         None

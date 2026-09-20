@@ -153,16 +153,16 @@ pub(crate) mod build;
 pub mod common;
 pub mod disc;
 pub(crate) mod io;
-#[cfg(feature = "python")]
+#[cfg(all(feature = "python", not(target_family = "wasm")))]
 mod python;
 pub mod read;
 pub mod util;
 pub mod write;
 
-#[cfg(feature = "python")]
+#[cfg(all(feature = "python", not(target_family = "wasm")))]
 use pyo3::prelude::*;
 
-#[cfg(feature = "python")]
+#[cfg(all(feature = "python", not(target_family = "wasm")))]
 #[pymodule]
 fn nod_rs(m: &Bound<'_, PyModule>) -> PyResult<()> { python::register(m) }
 

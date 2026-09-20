@@ -11,13 +11,14 @@ codegen-units = 1
 [workspace.package]
 version = "2.0.0-alpha.12"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.92"
 authors = ["Luke Street <luke@street.dev>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/encounter/nod"
 keywords = ["gamecube", "wii", "iso", "wbfs", "rvz"]
 
 [workspace.dependencies]
+structured-zstd = { version = "0.0.55", default-features = false, features = ["std", "hash", "kernel-scalar"] }
 digest = { version = "0.11.0", default-features = false }
 md-5 = { version = "0.11.0-rc.5", default-features = false }
 sha1 = { version = "0.11.0-rc.5", default-features = false }

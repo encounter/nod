@@ -41,8 +41,10 @@ fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("parsed-dats.bin");
     let out_file = File::create(dest_path).expect("Failed to open out file");
-    let mut out = zstd::Encoder::new(BufWriter::new(out_file), zstd::zstd_safe::max_c_level())
-        .expect("Failed to create zstd encoder");
+    let mut out = structured_zstd::encoding::StreamingEncoder::new(
+        BufWriter::new(out_file),
+        structured_zstd::encoding::CompressionLevel::from_level(19),
+    );
 
     // Parse dat files
     let mut entries = Vec::<(GameEntry, String)>::new();
@@ -80,8 +82,7 @@ fn main() {
     let entries_size = entries.len() * size_of::<GameEntry>();
     let string_table_size = entries.iter().map(|(_, name)| name.len() + 4).sum::<usize>();
     let total_size = size_of::<Header>() + entries_size + string_table_size;
-    out.set_pledged_src_size(Some(total_size as u64)).unwrap();
-    out.include_contentsize(true).unwrap();
+    out.set_pledged_content_size(total_size as u64).unwrap();
 
     // Write game entries
     let header =

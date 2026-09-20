@@ -15,6 +15,7 @@ keywords.workspace = true
 categories = ["command-line-utilities", "parser-implementations"]
 
 [features]
+# Codec backends are pure Rust; vendored/static names remain compatibility aliases.
 default = [
     "compress-bzip2-vendored",
     "compress-lzma-vendored",
@@ -22,20 +23,21 @@ default = [
     "compress-zstd-vendored",
     "threading",
 ]
-compress-bzip2 = []
-compress-bzip2-vendored = ["compress-bzip2", "dep:bzip2-sys"]
-compress-bzip2-static = ["compress-bzip2-vendored", "bzip2-sys/static"]
-compress-lzma = []
-compress-lzma-vendored = ["compress-lzma", "dep:liblzma-sys"]
-compress-lzma-static = ["compress-lzma-vendored", "liblzma-sys/static"]
-compress-zlib = ["dep:adler2"]
-compress-zlib-vendored = ["compress-zlib", "dep:libz-sys"]
-compress-zlib-static = ["compress-zlib-vendored", "libz-sys/static"]
-compress-zstd = []
-compress-zstd-vendored = ["compress-zstd", "dep:zstd-sys"]
+compress-bzip2 = ["dep:bzip2"]
+compress-bzip2-vendored = ["compress-bzip2"]
+compress-bzip2-static = ["compress-bzip2-vendored"]
+compress-lzma = ["dep:lzma-rust2"]
+compress-lzma-vendored = ["compress-lzma"]
+compress-lzma-static = ["compress-lzma-vendored"]
+compress-zlib = ["dep:adler2", "dep:flate2"]
+compress-zlib-vendored = ["compress-zlib"]
+compress-zlib-static = ["compress-zlib-vendored"]
+compress-zstd = ["dep:structured-zstd"]
+compress-zstd-vendored = ["compress-zstd"]
 compress-zstd-static = ["compress-zstd-vendored"]
-openssl = ["dep:openssl"]
-openssl-vendored = ["openssl", "openssl/vendored"]
+# Compatibility aliases: cryptography always uses RustCrypto.
+openssl = []
+openssl-vendored = ["openssl"]
 python = ["dep:pyo3", "compress-bzip2-vendored", "compress-lzma-vendored", "compress-zlib-vendored", "compress-zstd-vendored", "threading"]
 threading = ["dep:crossbeam-channel", "dep:crossbeam-utils"]
 
@@ -46,26 +48,27 @@ crypto-common = "0.2"
 base16ct = "1.0"
 block-padding = "0.4"
 bytes = "1.11"
-bzip2-sys = { version = "0.1.13", optional = true }
+bzip2 = { version = "0.6.1", optional = true }
 cbc = "0.2.0-rc.3"
 crc32fast = "1.5"
-crossbeam-channel = { version = "0.5", optional = true }
-crossbeam-utils = { version = "0.8", optional = true }
 digest = { workspace = true }
 dyn-clone = "1.0"
 encoding_rs = "0.8"
 itertools = "0.14"
-liblzma-sys = { version = "0.4", optional = true }
+lzma-rust2 = { version = "0.21", default-features = false, features = ["std", "encoder"], optional = true }
 lru = "0.18"
 md-5 = { workspace = true }
-libz-sys = { version = "1.1", optional = true }
-openssl = { version = "0.10", optional = true }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 polonius-the-crab = "0.5"
-pyo3 = { version = "0.29", features = ["abi3-py310", "extension-module"], optional = true }
 sha1 = { workspace = true }
 simple_moving_average = "1.0"
 thiserror = "2.0"
 tracing = { workspace = true }
 xxhash-rust = { version = "0.8", features = ["xxh64"] }
 zerocopy = { workspace = true }
-zstd-sys = { version = "2.0", default-features = false, optional = true }
+structured-zstd = { workspace = true, optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+crossbeam-channel = { version = "0.5", optional = true }
+crossbeam-utils = { version = "0.8", optional = true }
+pyo3 = { version = "0.29", features = ["abi3-py310", "extension-module"], optional = true }

@@ -1,4 +1,4 @@
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 use std::{collections::HashMap, thread::JoinHandle, time::Instant};
 use std::{
     fmt::{Display, Formatter},
@@ -9,15 +9,15 @@ use std::{
 };
 
 use bytes::{Bytes, BytesMut};
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 use crossbeam_channel::{Receiver, Sender};
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 use crossbeam_utils::sync::WaitGroup;
 use lru::LruCache;
 use polonius_the_crab::{polonius, polonius_return};
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 use simple_moving_average::{SMA, SingleSumSMA};
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 use tracing::{Level, span};
 use tracing::{debug, error, instrument};
 use zerocopy::FromZeros;
@@ -82,15 +82,15 @@ pub type SectorGroupResult = io::Result<SectorGroup>;
 
 #[allow(unused)]
 pub struct Preloader {
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     request_tx: Sender<SectorGroupRequest>,
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     request_rx: Receiver<SectorGroupRequest>,
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     stat_tx: Sender<PreloaderThreadStats>,
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     stat_rx: Receiver<PreloaderThreadStats>,
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     threads: Mutex<PreloaderThreads>,
     cache: Arc<Mutex<PreloaderCache>>,
     // Fallback single-threaded loader
@@ -98,7 +98,7 @@ pub struct Preloader {
 }
 
 #[allow(unused)]
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 struct PreloaderThreads {
     join_handles: Vec<JoinHandle<()>>,
     last_adjust: Instant,
@@ -108,7 +108,7 @@ struct PreloaderThreads {
     io_time_avg: SingleSumSMA<Duration, u32, 100>,
 }
 
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 impl PreloaderThreads {
     fn new(join_handles: Vec<JoinHandle<()>>) -> Self {
         Self {
@@ -126,7 +126,7 @@ impl PreloaderThreads {
         self.req_time_avg.add_sample(stat.req_time);
         self.io_time_avg.add_sample(stat.io_time);
         self.num_samples += 1;
-        if self.num_samples % 100 == 0 {
+        if self.num_samples.is_multiple_of(100) {
             let avg_wait = self.wait_time_avg.get_average();
             let avg_req = self.req_time_avg.get_average();
             let avg_io = self.io_time_avg.get_average();
@@ -166,7 +166,7 @@ impl PreloaderThreads {
 }
 
 struct PreloaderCache {
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     inflight: HashMap<SectorGroupRequest, WaitGroup>,
     lru_cache: LruCache<SectorGroupRequest, SectorGroup>,
 }
@@ -174,7 +174,7 @@ struct PreloaderCache {
 impl Default for PreloaderCache {
     fn default() -> Self {
         Self {
-            #[cfg(feature = "threading")]
+            #[cfg(all(feature = "threading", not(target_family = "wasm")))]
             inflight: Default::default(),
             lru_cache: LruCache::new(NonZeroUsize::new(64).unwrap()),
         }
@@ -184,21 +184,21 @@ impl Default for PreloaderCache {
 impl PreloaderCache {
     fn push(&mut self, request: SectorGroupRequest, group: SectorGroup) {
         self.lru_cache.push(request, group);
-        #[cfg(feature = "threading")]
+        #[cfg(all(feature = "threading", not(target_family = "wasm")))]
         self.inflight.remove(&request);
     }
 
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     fn remove(&mut self, request: &SectorGroupRequest) { self.inflight.remove(request); }
 
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     fn contains(&self, request: &SectorGroupRequest) -> bool {
         self.lru_cache.contains(request) || self.inflight.contains_key(request)
     }
 }
 
 #[allow(unused)]
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 struct PreloaderThreadStats {
     thread_id: usize,
     wait_time: Duration,
@@ -206,7 +206,7 @@ struct PreloaderThreadStats {
     io_time: Duration,
 }
 
-#[cfg(feature = "threading")]
+#[cfg(all(feature = "threading", not(target_family = "wasm")))]
 fn preloader_thread(
     thread_id: usize,
     request_rx: Receiver<SectorGroupRequest>,
@@ -257,7 +257,7 @@ fn preloader_thread(
 }
 
 impl Preloader {
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     pub fn new(loader: SectorGroupLoader, num_threads: usize) -> Arc<Self> {
         debug!("Creating preloader with {} threads", num_threads);
 
@@ -279,7 +279,7 @@ impl Preloader {
         Arc::new(Self { request_tx, request_rx, stat_tx, stat_rx, threads, cache, loader })
     }
 
-    #[cfg(not(feature = "threading"))]
+    #[cfg(not(all(feature = "threading", not(target_family = "wasm"))))]
     pub fn new(loader: SectorGroupLoader) -> Arc<Self> {
         debug!("Creating single-threaded preloader");
         let cache = Arc::new(Mutex::new(PreloaderCache::default()));
@@ -289,7 +289,7 @@ impl Preloader {
 
     #[allow(unused)]
     pub fn shutdown(self) {
-        #[cfg(feature = "threading")]
+        #[cfg(all(feature = "threading", not(target_family = "wasm")))]
         {
             let guard = self.threads.into_inner().unwrap();
             for handle in guard.join_handles {
@@ -300,7 +300,7 @@ impl Preloader {
 
     #[instrument(name = "Preloader::fetch", skip_all)]
     pub fn fetch(&self, request: SectorGroupRequest, max_groups: u32) -> SectorGroupResult {
-        #[cfg(feature = "threading")]
+        #[cfg(all(feature = "threading", not(target_family = "wasm")))]
         {
             let num_threads = {
                 let mut threads_guard = self.threads.lock().map_err(map_poisoned)?;
@@ -343,7 +343,7 @@ impl Preloader {
                 drop(cache_guard);
             }
         }
-        #[cfg(not(feature = "threading"))]
+        #[cfg(not(all(feature = "threading", not(target_family = "wasm"))))]
         let _ = max_groups;
 
         // No threads are running, fallback to single-threaded loader
@@ -674,10 +674,10 @@ pub fn fetch_sector_group<'a>(
     preloader: &Preloader,
 ) -> io::Result<(&'a SectorGroup, bool)> {
     polonius!(|cached| -> io::Result<(&'polonius SectorGroup, bool)> {
-        if let Some(sector_group) = cached {
-            if sector_group.request == request {
-                polonius_return!(Ok((sector_group, false)));
-            }
+        if let Some(sector_group) = cached
+            && sector_group.request == request
+        {
+            polonius_return!(Ok((sector_group, false)));
         }
     });
     let sector_group = preloader.fetch(request, max_groups)?;

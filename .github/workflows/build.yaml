@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        toolchain: [ stable, 1.85.0, nightly ]
+        toolchain: [ stable, 1.92.0, nightly ]
       fail-fast: false
     env:
       RUSTFLAGS: -D warnings
@@ -37,6 +37,31 @@ jobs:
         run: cargo check --all-targets
       - name: Cargo clippy
         run: cargo clippy --all-targets
+
+  wasm:
+    name: Library WebAssembly
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check all core features
+        run: cargo check --locked -p nod --all-features --target wasm32-unknown-unknown
+      - name: Build in-memory conversion example
+        run: cargo build --locked -p nod --example wasm_roundtrip --target wasm32-unknown-unknown
+      - name: Run without host imports
+        run: node scripts/wasm-smoke.mjs
 
   fmt:
     name: Format
@@ -105,7 +130,9 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.9
       - name: Cargo test
-        run: cargo test --release
+        run: cargo test --workspace --release
+      - name: In-memory format roundtrips
+        run: cargo run --locked --release -p nod --example wasm_roundtrip
 
   build:
     name: Build nodtool

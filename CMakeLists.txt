@@ -8,14 +8,9 @@ option(NOD_COMPRESS_LZMA "Enable LZMA/LZMA2 support" ON)
 option(NOD_COMPRESS_ZLIB "Enable zlib/deflate support" ON)
 option(NOD_COMPRESS_ZSTD "Enable Zstandard support" ON)
 option(NOD_THREADING "Enable threaded processing support" ON)
-option(NOD_USE_CMAKE_COMPRESSION
-    "Use CMake-provided compression libraries instead of Cargo vendoring. \
-When OFF (default), Cargo builds and statically links compression libraries \
-via -sys crates. When ON, compression libraries are found/built by CMake \
-and linked externally (useful when the parent project shares these libraries)."
-    OFF)
-
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+# Retained for compatibility with existing parent projects. All codecs are now
+# compiled from Rust by Cargo, so no external compression libraries are needed.
+option(NOD_USE_CMAKE_COMPRESSION "Compatibility option (compression is pure Rust)" OFF)
 
 # Fetch Corrosion, allowing us to import the nod-ffi crate as a CMake target.
 FetchContent_Declare(
@@ -25,39 +20,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Corrosion)
 
-# Build the feature list based on the selected compression mode.
+# The feature names and toggles are unchanged; each codec now uses pure Rust.
 set(NOD_FEATURES)
-if (NOD_USE_CMAKE_COMPRESSION)
-    # CMake-provided compression: use base features (raw #[link] FFI).
-    # NodCompressionDeps.cmake handles finding/building the C libraries
-    # and linking them to the nod target.
-    if (NOD_COMPRESS_BZIP2)
-        list(APPEND NOD_FEATURES compress-bzip2)
-    endif()
-    if (NOD_COMPRESS_LZMA)
-        list(APPEND NOD_FEATURES compress-lzma)
-    endif()
-    if (NOD_COMPRESS_ZLIB)
-        list(APPEND NOD_FEATURES compress-zlib)
-    endif()
-    if (NOD_COMPRESS_ZSTD)
-        list(APPEND NOD_FEATURES compress-zstd)
-    endif()
-else()
-    # Cargo-vendored compression (default): -sys crates build and statically
-    # link the C libraries within Cargo. No CMake compression deps needed.
-    if (NOD_COMPRESS_BZIP2)
-        list(APPEND NOD_FEATURES compress-bzip2-static)
-    endif()
-    if (NOD_COMPRESS_LZMA)
-        list(APPEND NOD_FEATURES compress-lzma-static)
-    endif()
-    if (NOD_COMPRESS_ZLIB)
-        list(APPEND NOD_FEATURES compress-zlib-static)
-    endif()
-    if (NOD_COMPRESS_ZSTD)
-        list(APPEND NOD_FEATURES compress-zstd-static)
-    endif()
+if (NOD_COMPRESS_BZIP2)
+    list(APPEND NOD_FEATURES compress-bzip2)
+endif()
+if (NOD_COMPRESS_LZMA)
+    list(APPEND NOD_FEATURES compress-lzma)
+endif()
+if (NOD_COMPRESS_ZLIB)
+    list(APPEND NOD_FEATURES compress-zlib)
+endif()
+if (NOD_COMPRESS_ZSTD)
+    list(APPEND NOD_FEATURES compress-zstd)
 endif()
 if (NOD_THREADING)
     list(APPEND NOD_FEATURES threading)
@@ -76,61 +51,6 @@ corrosion_import_crate(
     CRATES nod-ffi # NOTE: target becomes `nod`
     ${NOD_IMPORT_ARGS}
 )
-
-# When using CMake-provided compression, find/build the C libraries
-# and link them to the Rust target.
-if (NOD_USE_CMAKE_COMPRESSION)
-    include(NodCompressionDeps)
-
-    if (NOD_COMPRESS_BZIP2)
-        nod_require_bzip2(_nod_bzip2_target)
-        target_link_libraries(nod INTERFACE "${_nod_bzip2_target}")
-        nod_resolve_corrosion_link_input(_nod_bzip2_rust_link "${_nod_bzip2_target}" "bz2")
-        nod_get_target_linker_dir(_nod_bzip2_linker_dir "${_nod_bzip2_rust_link}")
-        if (_nod_bzip2_linker_dir)
-            corrosion_add_target_rustflags(nod "-L" "${_nod_bzip2_linker_dir}")
-        else()
-            corrosion_link_libraries(nod "${_nod_bzip2_rust_link}")
-        endif()
-        add_dependencies(_cargo-build_nod "${_nod_bzip2_rust_link}")
-    endif()
-    if (NOD_COMPRESS_LZMA)
-        nod_require_liblzma(_nod_liblzma_target)
-        target_link_libraries(nod INTERFACE "${_nod_liblzma_target}")
-        nod_resolve_corrosion_link_input(_nod_liblzma_rust_link "${_nod_liblzma_target}" "lzma")
-        nod_get_target_linker_dir(_nod_liblzma_linker_dir "${_nod_liblzma_rust_link}")
-        if (_nod_liblzma_linker_dir)
-            corrosion_add_target_rustflags(nod "-L" "${_nod_liblzma_linker_dir}")
-        else()
-            corrosion_link_libraries(nod "${_nod_liblzma_rust_link}")
-        endif()
-        add_dependencies(_cargo-build_nod "${_nod_liblzma_rust_link}")
-    endif()
-    if (NOD_COMPRESS_ZLIB)
-        nod_require_zlib(_nod_zlib_target)
-        target_link_libraries(nod INTERFACE "${_nod_zlib_target}")
-        nod_resolve_corrosion_link_input(_nod_zlib_rust_link "${_nod_zlib_target}" "z")
-        nod_get_target_linker_dir(_nod_zlib_linker_dir "${_nod_zlib_rust_link}")
-        if (_nod_zlib_linker_dir)
-            corrosion_add_target_rustflags(nod "-L" "${_nod_zlib_linker_dir}")
-        else()
-            corrosion_link_libraries(nod "${_nod_zlib_rust_link}")
-        endif()
-        add_dependencies(_cargo-build_nod "${_nod_zlib_rust_link}")
-    endif()
-    if (NOD_COMPRESS_ZSTD)
-        nod_require_zstd(_nod_zstd_target)
-        target_link_libraries(nod INTERFACE "${_nod_zstd_target}")
-        nod_resolve_corrosion_link_input(_nod_zstd_rust_link "${_nod_zstd_target}" "zstd")
-        nod_get_target_linker_dir(_nod_zstd_linker_dir "${_nod_zstd_rust_link}")
-        if (_nod_zstd_linker_dir)
-            corrosion_add_target_rustflags(nod "-L" "${_nod_zstd_linker_dir}")
-        else()
-            corrosion_link_libraries(nod "${_nod_zstd_rust_link}")
-        endif()
-        add_dependencies(_cargo-build_nod "${_nod_zstd_rust_link}")
-    endif()
-endif()
 
 target_sources(nod INTERFACE
     FILE_SET HEADERS

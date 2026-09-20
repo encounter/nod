@@ -51,7 +51,7 @@ pub struct DiscOptions {
     /// Number of threads to use for preloading data as the disc is read. This
     /// is particularly useful when reading the disc image sequentially, as it
     /// can perform decompression and rebuilding in parallel with the main
-    /// read thread. The default value of 0 disables preloading.
+    /// read thread. The default value of 0 disables preloading. Ignored on WebAssembly.
     #[cfg(feature = "threading")]
     pub preloader_threads: usize,
 }

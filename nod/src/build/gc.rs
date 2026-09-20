@@ -115,13 +115,13 @@ impl GCPartitionBuilder {
     }
 
     pub fn add_file(&mut self, info: FileInfo) -> Result<()> {
-        if let (Some(offset), Some(alignment)) = (info.offset, info.alignment) {
-            if offset % alignment as u64 != 0 {
-                return Err(Error::Other(format!(
-                    "File {} offset {:#X} is not aligned to {}",
-                    info.name, offset, alignment
-                )));
-            }
+        if let (Some(offset), Some(alignment)) = (info.offset, info.alignment)
+            && offset % alignment as u64 != 0
+        {
+            return Err(Error::Other(format!(
+                "File {} offset {:#X} is not aligned to {}",
+                info.name, offset, alignment
+            )));
         }
         self.user_files.push(info);
         Ok(())

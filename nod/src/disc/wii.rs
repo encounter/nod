@@ -379,14 +379,15 @@ impl BufRead for PartitionReaderWii {
         // Load sector group
         let (sector_group, updated) =
             fetch_sector_group(request, max_groups, &mut self.sector_group, &self.preloader)?;
-        if updated && self.options.validate_hashes {
-            if let Some(h3_table) = self.meta.as_ref().and_then(|m| m.raw_h3_table.as_deref()) {
-                verify_hashes(
-                    array_ref![sector_group.data, 0, SECTOR_GROUP_SIZE],
-                    group_idx,
-                    h3_table,
-                )?;
-            }
+        if updated
+            && self.options.validate_hashes
+            && let Some(h3_table) = self.meta.as_ref().and_then(|m| m.raw_h3_table.as_deref())
+        {
+            verify_hashes(
+                array_ref![sector_group.data, 0, SECTOR_GROUP_SIZE],
+                group_idx,
+                h3_table,
+            )?;
         }
 
         // Read from sector group buffer

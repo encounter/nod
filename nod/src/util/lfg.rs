@@ -248,9 +248,9 @@ impl LaggedFibonacci {
         let word_offset_div_k = word_offset / LFG_K;
 
         for (i, chunk) in
-            data[bytes_to_skip..bytes_to_skip + LFG_K_BYTES].chunks_exact(4).enumerate()
+            data[bytes_to_skip..bytes_to_skip + LFG_K_BYTES].as_chunks::<4>().0.iter().enumerate()
         {
-            let word = u32::from_be_bytes(chunk.try_into().unwrap());
+            let word = u32::from_be_bytes(*chunk);
             // If the data doesn't look like something we can regenerate, return early.
             if word & 0x00C00000 != (word >> 2) & 0x00C00000 {
                 return 0;

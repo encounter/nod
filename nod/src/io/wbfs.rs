@@ -244,7 +244,7 @@ impl DiscWriterWBFS {
             return Err(Error::DiscFormat("WBFS does not support compression".to_string()));
         }
         let block_size = options.block_size;
-        if block_size < SECTOR_SIZE as u32 || block_size % SECTOR_SIZE as u32 != 0 {
+        if block_size < SECTOR_SIZE as u32 || !block_size.is_multiple_of(SECTOR_SIZE as u32) {
             return Err(Error::DiscFormat("Invalid block size for WBFS".to_string()));
         }
         let sector_size = 512u32;
@@ -325,7 +325,7 @@ impl DiscWriter for DiscWriterWBFS {
                 scrub_update_partition: options.scrub == ScrubLevel::UpdatePartition,
             },
             self.block_count as u32,
-            #[cfg(feature = "threading")]
+            #[cfg(all(feature = "threading", not(target_family = "wasm")))]
             options.processor_threads,
             |block| -> Result<()> {
                 // Update hashers

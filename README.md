@@ -6,7 +6,7 @@
 [crates.io]: https://crates.io/crates/nod
 [Api Rustdoc]: https://img.shields.io/badge/api-rustdoc-blue.svg
 [rustdoc]: https://docs.rs/nod
-[Rust Version]: https://img.shields.io/badge/rust-1.85+-blue.svg?maxAge=3600
+[Rust Version]: https://img.shields.io/badge/rust-1.92+-blue.svg?maxAge=3600
 
 Library for reading and writing Nintendo Optical Disc (GameCube and Wii) images.
 
@@ -217,6 +217,10 @@ For a full end-to-end example of using the C API, see [SDL3 IOStream Demo](nod-f
 ### Integration with CMake
 
 The top-level `CMakeLists.txt` builds the Rust library via [Corrosion](https://github.com/corrosion-rs/corrosion) and exports the target `nod::nod`.
+
+Compression libraries no longer need to be installed or linked by CMake. The
+`nod::nod` target and C header are unchanged. `NOD_USE_CMAKE_COMPRESSION` is still
+accepted for compatibility and has no effect; Cargo builds the Rust codecs.
 
 Features can be toggled with CMake options:
 

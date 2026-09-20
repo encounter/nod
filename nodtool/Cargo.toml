@@ -46,7 +46,7 @@ tracing-attributes = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-tracy = { version = "0.11", features = ["flush-on-exit"], optional = true }
 zerocopy = { workspace = true }
-zstd = "0.13"
+structured-zstd = { workspace = true }
 
 [target.'cfg(target_env = "musl")'.dependencies]
 mimalloc = "0.1"
@@ -56,4 +56,4 @@ hex = { version = "0.4", features = ["serde"] }
 quick-xml = { version = "0.41", features = ["serialize"] }
 serde = { version = "1.0", features = ["derive"] }
 zerocopy = { version = "0.8", features = ["alloc", "derive"] }
-zstd = "0.13"
+structured-zstd = { workspace = true }

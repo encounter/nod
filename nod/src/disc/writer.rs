@@ -96,18 +96,18 @@ pub fn read_block(reader: &mut DiscReader, block_size: usize) -> io::Result<(Byt
 }
 
 /// Process blocks in parallel, ensuring that they are written in order.
-#[cfg_attr(not(feature = "threading"), inline)]
+#[cfg_attr(not(all(feature = "threading", not(target_family = "wasm"))), inline)]
 pub(crate) fn par_process<P, T>(
     mut processor: P,
     block_count: u32,
-    #[cfg(feature = "threading")] num_threads: usize,
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))] num_threads: usize,
     mut callback: impl FnMut(BlockResult<T>) -> Result<()>,
 ) -> Result<()>
 where
     T: Send,
     P: BlockProcessor<BlockMeta = T>,
 {
-    #[cfg(feature = "threading")]
+    #[cfg(all(feature = "threading", not(target_family = "wasm")))]
     if num_threads > 0 {
         return std::thread::scope(|s| {
             use std::collections::VecDeque;
@@ -220,10 +220,10 @@ pub(crate) fn check_block(
             return Ok(CheckBlockResult::Zeroed);
         }
 
-        if input_position % SECTOR_SIZE as u64 != 0 {
+        if !input_position.is_multiple_of(SECTOR_SIZE as u64) {
             return Err(io::Error::other("Partition block not aligned to sector boundary"));
         }
-        if buf.len() % SECTOR_SIZE != 0 {
+        if !buf.len().is_multiple_of(SECTOR_SIZE) {
             return Err(io::Error::other("Partition block not a multiple of sector size"));
         }
         let block = if partition.has_encryption {
@@ -273,7 +273,7 @@ pub(crate) fn check_block(
 
 #[inline]
 fn sector_data_iter(buf: &[u8]) -> impl Iterator<Item = &[u8; SECTOR_DATA_SIZE]> {
-    buf.chunks_exact(SECTOR_SIZE).map(|chunk| (&chunk[HASHES_SIZE..]).try_into().unwrap())
+    buf.as_chunks::<SECTOR_SIZE>().0.iter().map(|chunk| (&chunk[HASHES_SIZE..]).try_into().unwrap())
 }
 
 #[cfg(test)]

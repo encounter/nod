@@ -217,7 +217,7 @@ impl BlockProcessor for BlockProcessorGCZ {
 
         // Try to compress block
         let is_compressed = if self.compressor.compress(&block_data)? {
-            println!("Compressed block {} to {}", block_idx, self.compressor.buffer.len());
+            tracing::debug!("Compressed block {} to {}", block_idx, self.compressor.buffer.len());
             block_data = Bytes::copy_from_slice(self.compressor.buffer.as_slice());
             true
         } else {
@@ -259,7 +259,7 @@ impl DiscWriterGCZ {
         }
 
         let block_size = options.block_size;
-        if block_size < SECTOR_SIZE as u32 || block_size % SECTOR_SIZE as u32 != 0 {
+        if block_size < SECTOR_SIZE as u32 || !block_size.is_multiple_of(SECTOR_SIZE as u32) {
             return Err(Error::DiscFormat("Invalid block size for GCZ".to_string()));
         }
 
@@ -315,7 +315,7 @@ impl DiscWriter for DiscWriterGCZ {
                 compressor: Compressor::new(self.compression, block_size as usize),
             },
             block_count,
-            #[cfg(feature = "threading")]
+            #[cfg(all(feature = "threading", not(target_family = "wasm")))]
             options.processor_threads,
             |block| {
                 // Update hashers
