@@ -330,11 +330,17 @@ impl FstBuilder {
 
     /// Get the byte size of the FST.
     pub fn byte_size(&self) -> usize {
-        size_of_val(self.nodes.as_slice()) + self.string_table.len()
+        (size_of_val(self.nodes.as_slice()) + self.string_table.len())
+            .next_multiple_of(self.size_alignment())
     }
+
+    /// Wii boot headers store the FST size divided by four, so a Wii FST that is
+    /// not a multiple of four cannot be described and MUST be padded.
+    fn size_alignment(&self) -> usize { if self.is_wii { 4 } else { 1 } }
 
     /// Finalize the FST and return the serialized data.
     pub fn finalize(mut self) -> Box<[u8]> {
+        let alignment = self.size_alignment();
         // Finalize directory lengths
         let node_count = self.nodes.len() as u32;
         while let Some((_, idx)) = self.stack.pop() {
@@ -345,10 +351,11 @@ impl FstBuilder {
         // Serialize nodes and string table
         let nodes_data = self.nodes.as_bytes();
         let string_table_data = self.string_table.as_bytes();
-        let mut data =
-            <[u8]>::new_box_zeroed_with_elems(nodes_data.len() + string_table_data.len()).unwrap();
+        let size = (nodes_data.len() + string_table_data.len()).next_multiple_of(alignment);
+        let mut data = <[u8]>::new_box_zeroed_with_elems(size).unwrap();
         data[..nodes_data.len()].copy_from_slice(self.nodes.as_bytes());
-        data[nodes_data.len()..].copy_from_slice(self.string_table.as_bytes());
+        data[nodes_data.len()..nodes_data.len() + string_table_data.len()]
+            .copy_from_slice(string_table_data);
         data
     }
 
@@ -372,5 +379,23 @@ impl FstBuilder {
         let idx = self.nodes.len() as u32;
         self.nodes.push(Node::new(kind, name_offset as u32, offset, length, self.is_wii));
         idx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Fst, FstBuilder};
+
+    #[test]
+    fn wii_fst_size_is_aligned_to_four_bytes() {
+        let mut builder = FstBuilder::new(true);
+        builder.add_file("a", 0, 1);
+        let expected_size = builder.byte_size();
+        assert_eq!(expected_size % 4, 0);
+
+        let fst = builder.finalize();
+        assert_eq!(fst.len(), expected_size);
+        assert_eq!(fst.last(), Some(&0));
+        Fst::new(&fst).unwrap();
     }
 }
