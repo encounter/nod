@@ -149,9 +149,9 @@ pub struct BootHeader {
     pub fst_max_size: U32,
     /// File system table load address
     pub fst_memory_address: U32,
-    /// User data offset
+    /// User data offset (Wii: >> 2)
     pub user_offset: U32,
-    /// User data size
+    /// User data size (Wii: >> 2)
     pub user_size: U32,
     /// Padding
     _pad2: [u8; 4],
@@ -224,6 +224,38 @@ impl BootHeader {
             self.fst_max_size.set((size / 4) as u32);
         } else {
             self.fst_max_size.set(size as u32);
+        }
+    }
+
+    /// Offset within the partition to the user data.
+    #[inline]
+    pub fn user_offset(&self, is_wii: bool) -> u64 {
+        if is_wii { self.user_offset.get() as u64 * 4 } else { self.user_offset.get() as u64 }
+    }
+
+    /// Set the offset within the partition to the user data.
+    #[inline]
+    pub fn set_user_offset(&mut self, offset: u64, is_wii: bool) {
+        if is_wii {
+            self.user_offset.set((offset / 4) as u32);
+        } else {
+            self.user_offset.set(offset as u32);
+        }
+    }
+
+    /// Size of the user data.
+    #[inline]
+    pub fn user_size(&self, is_wii: bool) -> u64 {
+        if is_wii { self.user_size.get() as u64 * 4 } else { self.user_size.get() as u64 }
+    }
+
+    /// Set the size of the user data.
+    #[inline]
+    pub fn set_user_size(&mut self, size: u64, is_wii: bool) {
+        if is_wii {
+            self.user_size.set((size / 4) as u32);
+        } else {
+            self.user_size.set(size as u32);
         }
     }
 }

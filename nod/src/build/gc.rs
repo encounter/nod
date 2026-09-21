@@ -5,7 +5,6 @@ use std::{
     sync::Arc,
 };
 
-use tracing::debug;
 use zerocopy::{FromZeros, IntoBytes};
 
 use crate::{
@@ -139,8 +138,10 @@ impl GCPartitionBuilder {
         layout.locate_sys_files(sys_file_callback)?;
         layout.apply_overrides(&self.overrides)?;
         let write_info = layout.layout_files()?;
-        let disc_size =
-            layout.boot_header.user_offset.get() as u64 + layout.boot_header.user_size.get() as u64;
+        let is_wii = layout.disc_header.is_wii();
+        let user_end =
+            layout.boot_header.user_offset(is_wii) + layout.boot_header.user_size(is_wii);
+        let disc_size = if is_wii { user_end.align_up(SECTOR_SIZE as u64) } else { user_end };
         let junk_id = layout.junk_id();
         Ok(GCPartitionWriter::new(write_info, disc_size, junk_id, self.disc_header.disc_num))
     }
@@ -478,15 +479,16 @@ impl GCPartitionLayout {
     }
 
     fn layout_files(&mut self) -> Result<Vec<WriteInfo>> {
+        let is_wii = self.disc_header.is_wii();
         let mut system_write_info = Vec::new();
         let mut write_info = Vec::with_capacity(self.user_files.len());
         let mut last_offset = self.layout_system_data(&mut system_write_info)?;
 
         // Layout user data
-        let mut user_offset = self.boot_header.user_offset.get() as u64;
+        let mut user_offset = self.boot_header.user_offset(is_wii);
         if user_offset == 0 {
             user_offset = last_offset.align_up(SECTOR_SIZE as u64);
-            self.boot_header.user_offset.set(user_offset as u32);
+            self.boot_header.set_user_offset(user_offset, is_wii);
         } else if user_offset < last_offset {
             return Err(Error::Other(format!(
                 "User offset {:#X} is before FST {:#X}",
@@ -507,7 +509,6 @@ impl GCPartitionLayout {
         }
 
         // Generate FST from only user files
-        let is_wii = self.disc_header.is_wii();
         let fst_data = self.generate_fst(&write_info)?;
         let fst_size = fst_data.len() as u64;
         write_info.push(WriteInfo {
@@ -521,13 +522,10 @@ impl GCPartitionLayout {
         sort_files(&mut write_info)?;
 
         // Update user size if not set
-        if self.boot_header.user_size.get() == 0 {
-            let user_end = if self.disc_header.is_wii() {
-                last_offset.align_up(SECTOR_SIZE as u64)
-            } else {
-                MINI_DVD_SIZE
-            };
-            self.boot_header.user_size.set((user_end - user_offset) as u32);
+        if self.boot_header.user_size(is_wii) == 0 {
+            let user_end =
+                if is_wii { last_offset.align_up(SECTOR_SIZE as u64) } else { MINI_DVD_SIZE };
+            self.boot_header.set_user_size(user_end - user_offset, is_wii);
         }
 
         // Insert junk data
@@ -549,21 +547,20 @@ pub(crate) fn insert_junk_data(
     let mut new_write_info = Vec::with_capacity(write_info.len());
 
     let fst_end = boot_header.fst_offset(is_wii) + boot_header.fst_size(is_wii);
-    let file_gap = find_file_gap(&write_info, fst_end);
     let mut last_file_end = 0;
     for info in write_info {
         if let WriteKind::File(..) | WriteKind::Static(..) = &info.kind {
             let aligned_end = gcm_align(last_file_end);
             if info.offset > aligned_end && last_file_end >= fst_end {
-                // Junk data is aligned to 4 bytes with a 28 byte padding (aka `(n + 31) & !3`)
-                // but a few cases don't have the 28 byte padding. Namely, the junk data after the
-                // FST, and the junk data in between the inner and outer rim files. This attempts to
-                // determine the correct alignment, but is not 100% accurate.
-                let junk_start = if file_gap == Some(last_file_end) {
-                    last_file_end.align_up(4)
-                } else {
-                    aligned_end
-                };
+                // Junk data normally starts after a 28 byte padding (`gcm_align`, i.e.
+                // `(n + 31) & !3`). The exception is a large gap (> one sector) between two user
+                // files, i.e. an inner- to outer-rim transition: there the junk starts immediately
+                // at the (4-byte aligned) end of the previous file, with no 28 byte padding. The
+                // gap right after the FST is not such a transition, so it keeps the 28 byte padding.
+                let large_user_gap =
+                    last_file_end > fst_end && info.offset - last_file_end > SECTOR_SIZE as u64;
+                let junk_start =
+                    if large_user_gap { last_file_end.align_up(4) } else { aligned_end };
                 new_write_info.push(WriteInfo {
                     kind: WriteKind::Junk,
                     size: info.offset - junk_start,
@@ -575,11 +572,15 @@ pub(crate) fn insert_junk_data(
         new_write_info.push(info);
     }
     let aligned_end = gcm_align(last_file_end);
-    let user_end = boot_header.user_offset.get() as u64 + boot_header.user_size.get() as u64;
-    if aligned_end < user_end && aligned_end >= fst_end {
+    // On Wii the encrypted data is laid out in whole 0x8000 sectors, so trailing junk
+    // extends to the sector boundary past the end of user data. On GameCube it stops at
+    // the user data end.
+    let user_end = boot_header.user_offset(is_wii) + boot_header.user_size(is_wii);
+    let junk_end = if is_wii { user_end.align_up(SECTOR_SIZE as u64) } else { user_end };
+    if aligned_end < junk_end && aligned_end >= fst_end {
         new_write_info.push(WriteInfo {
             kind: WriteKind::Junk,
-            size: user_end - aligned_end,
+            size: junk_end - aligned_end,
             offset: aligned_end,
         });
     }
@@ -832,22 +833,4 @@ fn sort_files(files: &mut [WriteInfo]) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Files can be located on the inner rim of the disc (closer to the center) or the outer rim
-/// (closer to the edge). The inner rim is slower to read, so developers often configured certain
-/// files to be located on the outer rim. This function attempts to find a gap in the file offsets
-/// between the inner and outer rim, which we need to recreate junk data properly.
-fn find_file_gap(file_infos: &[WriteInfo], fst_end: u64) -> Option<u64> {
-    let mut last_offset = 0;
-    for info in file_infos {
-        if let WriteKind::File(..) | WriteKind::Static(..) = &info.kind {
-            if last_offset > fst_end && info.offset > last_offset + SECTOR_SIZE as u64 {
-                debug!("Found file gap at {:X} -> {:X}", last_offset, info.offset);
-                return Some(last_offset);
-            }
-            last_offset = info.offset + info.size;
-        }
-    }
-    None
 }
