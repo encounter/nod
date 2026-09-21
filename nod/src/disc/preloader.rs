@@ -168,6 +168,14 @@ impl PreloaderThreads {
 #[cfg(feature = "threading")]
 const MIN_READ_AHEAD_GROUPS: usize = 16;
 
+#[cfg(feature = "threading")]
+fn read_ahead_groups(num_threads: usize) -> usize {
+    if num_threads == 0 {
+        return 0;
+    }
+    num_threads.max(MIN_READ_AHEAD_GROUPS)
+}
+
 struct PreloaderCache {
     #[cfg(feature = "threading")]
     inflight: HashMap<SectorGroupRequest, WaitGroup>,
@@ -275,7 +283,7 @@ impl Preloader {
 
         let (request_tx, request_rx) = crossbeam_channel::unbounded();
         let (stat_tx, stat_rx) = crossbeam_channel::unbounded();
-        let read_ahead = num_threads.max(MIN_READ_AHEAD_GROUPS);
+        let read_ahead = read_ahead_groups(num_threads);
         let cache = Arc::new(Mutex::new(PreloaderCache::for_read_ahead(read_ahead, num_threads)));
         let mut join_handles = Vec::with_capacity(num_threads);
         for i in 0..num_threads {
@@ -324,7 +332,7 @@ impl Preloader {
             };
             let mut cache_guard = self.cache.lock().map_err(map_poisoned)?;
             // Preload read_ahead groups ahead
-            let read_ahead = num_threads.max(MIN_READ_AHEAD_GROUPS) as u32;
+            let read_ahead = read_ahead_groups(num_threads) as u32;
             for i in 0..read_ahead {
                 let group_idx = request.group_idx + i;
                 if group_idx >= max_groups {
