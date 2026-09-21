@@ -500,9 +500,10 @@ fn read_partition_info(
                             .unwrap_or(0);
                         if max_fst_offset > data_size {
                             if data_size == 0 {
-                                // Guess data size for decrypted partitions
+                                // The FST offset is partition-relative, but this field stores
+                                // absolute disc sectors.
                                 data_end_sector =
-                                    max_fst_offset.div_ceil(SECTOR_SIZE as u64) as u32;
+                                    decrypted_data_end_sector(data_start_sector, max_fst_offset);
                             } else {
                                 return Err(Error::DiscFormat(format!(
                                     "Partition {group_idx}:{part_idx} FST exceeds data size",
@@ -540,6 +541,10 @@ fn read_partition_info(
     Ok(part_info)
 }
 
+fn decrypted_data_end_sector(data_start_sector: u32, max_fst_offset: u64) -> u32 {
+    data_start_sector + max_fst_offset.div_ceil(SECTOR_SIZE as u64) as u32
+}
+
 fn guess_disc_size(part_info: &[PartitionInfo]) -> u64 {
     let max_offset = part_info
         .iter()
@@ -553,5 +558,15 @@ fn guess_disc_size(part_info: &[PartitionInfo]) -> u64 {
         SL_DVD_SIZE
     } else {
         DL_DVD_SIZE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SECTOR_SIZE, decrypted_data_end_sector};
+
+    #[test]
+    fn decrypted_partition_data_end_sector_is_absolute() {
+        assert_eq!(decrypted_data_end_sector(100, SECTOR_SIZE as u64 + 1), 102);
     }
 }
