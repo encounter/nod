@@ -18,6 +18,7 @@ use crate::{
     disc::{
         BootHeader, DiscHeader, SECTOR_SIZE,
         fst::Fst,
+        hashes::GroupHashes,
         reader::DiscReader,
         wii::{HASHES_SIZE, SECTOR_DATA_SIZE},
         writer::{BlockProcessor, BlockResult, DiscWriter, par_process, read_block},
@@ -29,7 +30,7 @@ use crate::{
     read::{DiscMeta, DiscStream},
     util::{
         Align,
-        aes::decrypt_sector_data_b2b,
+        aes::{aes_cbc_decrypt_b2b, decrypt_sector_data_b2b},
         array_ref, array_ref_mut,
         compress::{Compressor, DecompressionKind},
         digest::{DigestManager, sha1_hash, xxh64_hash},
@@ -1058,6 +1059,7 @@ struct BlockProcessorWIA {
     compressor: Compressor,
     lfg: LaggedFibonacci,
     junk_info: Arc<[JunkInfo]>,
+    hash_group: Option<(u32, Arc<GroupHashes>)>,
 }
 
 impl Clone for BlockProcessorWIA {
@@ -1071,6 +1073,7 @@ impl Clone for BlockProcessorWIA {
             compressor: self.compressor.clone(),
             lfg: LaggedFibonacci::default(),
             junk_info: self.junk_info.clone(),
+            hash_group: self.hash_group.clone(),
         }
     }
 }
@@ -1175,15 +1178,8 @@ impl BlockProcessor for BlockProcessorWIA {
                 }
             }
 
-            // Generate hash exceptions
-            let num_exception_list = (chunk_size as usize).div_ceil(0x200000); // 2 MiB
-            let mut exceptions_buf = BytesMut::with_capacity(num_exception_list * 2);
-            for _ in 0..num_exception_list {
-                // TODO
-                exceptions_buf.put_u16(0); // num_exceptions
-            }
-
-            (buf.freeze(), exceptions_buf.freeze())
+            let exceptions = self.hash_exceptions(&disc_data, &info, chunk_size as usize)?;
+            (buf.freeze(), exceptions)
         } else {
             (disc_data.clone(), Bytes::new())
         };
@@ -1223,6 +1219,15 @@ impl BlockProcessor for BlockProcessorWIA {
             let mut buf = BytesMut::with_capacity(hash_exception_data.len() + group_data.len());
             buf.put_slice(hash_exception_data.as_ref());
             buf.put_slice(group_data.as_ref());
+            if !is_rvz {
+                // WIA cannot fall back to an uncompressed group. At the maximum
+                // exception count, exceptions can be larger than the hash data
+                // removed from the source, so bound the actual encoded input.
+                let bound = compress_bound(self.compressor.kind, buf.len());
+                if self.compressor.buffer.capacity() < bound {
+                    self.compressor.buffer = Vec::with_capacity(bound);
+                }
+            }
             if self
                 .compressor
                 .compress(buf.as_ref())
@@ -1266,7 +1271,95 @@ impl BlockProcessor for BlockProcessorWIA {
     }
 }
 
+// Store both hash differences and nonzero padding. A 32-byte padding area needs
+// two overlapping 20-byte exceptions; 52 entries cover an entire sector without
+// crossing its hash area, matching the maximum supported by Dolphin readers.
+fn append_hash_exceptions(
+    output: &mut BytesMut,
+    sector: u16,
+    original: &[u8; HASHES_SIZE],
+    reconstructed: &[u8; HASHES_SIZE],
+) -> u16 {
+    let offsets = (0..0x280)
+        .step_by(20)
+        .chain((0x280..0x320).step_by(20))
+        .chain([0x320, 0x32c])
+        .chain((0x340..0x3e0).step_by(20))
+        .chain([0x3e0, 0x3ec]);
+    let mut count = 0;
+    for offset in offsets {
+        if original[offset..offset + 20] != reconstructed[offset..offset + 20] {
+            output.put_u16(sector * HASHES_SIZE as u16 + offset as u16);
+            output.put_slice(&original[offset..offset + 20]);
+            count += 1;
+        }
+    }
+    count
+}
+
 impl BlockProcessorWIA {
+    fn hash_exceptions(
+        &mut self,
+        disc_data: &[u8],
+        info: &GroupInfo,
+        chunk_size: usize,
+    ) -> io::Result<Bytes> {
+        let mut output = BytesMut::new();
+        // Even a short final chunk must contain every declared exception list.
+        for list in 0..chunk_size.div_ceil(0x200000) {
+            let count_offset = output.len();
+            output.put_u16(0);
+            let mut count = 0u16;
+            let start = list * 64;
+            let end = (start + 64).min(info.num_sectors as usize);
+            for local_sector in start..end {
+                let abs_sector = info.sector + local_sector as u32;
+                let partition_sector =
+                    info.section_offset / SECTOR_DATA_SIZE as u64 + local_sector as u64;
+                let expected_group_start = abs_sector - (partition_sector % 64) as u32;
+                // A short final group must not reuse its hashes in a following
+                // partition whose start falls within the same absolute 64 sectors.
+                if self
+                    .hash_group
+                    .as_ref()
+                    .is_none_or(|(start_sector, _)| *start_sector != expected_group_start)
+                {
+                    // H1 and H2 depend on the entire partition-aligned 64-sector
+                    // group, including sectors outside small RVZ chunks. Ignore
+                    // existing H0 hashes and zero-fill beyond the partition end.
+                    let (group, _) = self.inner.load_sector_group(abs_sector, true)?;
+                    let hashes = group.group_hashes.clone().ok_or_else(|| {
+                        io::Error::other("Missing reconstructed Wii partition hashes")
+                    })?;
+                    self.hash_group = Some((group.start_sector, hashes));
+                }
+                let (group_start, hashes) = self.hash_group.as_ref().unwrap();
+                let (h0, h1, h2) = hashes.hashes_for_sector((abs_sector - *group_start) as usize);
+                let mut reconstructed = [0u8; HASHES_SIZE];
+                reconstructed[..0x26c].copy_from_slice(h0.as_bytes());
+                reconstructed[0x280..0x320].copy_from_slice(h1.as_bytes());
+                reconstructed[0x340..0x3e0].copy_from_slice(h2.as_bytes());
+                let source = array_ref![disc_data, local_sector * SECTOR_SIZE, HASHES_SIZE];
+                let mut original = [0u8; HASHES_SIZE];
+                if let Some(key) = info.partition_key {
+                    aes_cbc_decrypt_b2b(&key, &[0u8; 16], source, &mut original);
+                } else {
+                    original.copy_from_slice(source);
+                }
+                // Small RVZ chunks use chunk-local offsets; for chunks above
+                // 2 MiB, offsets restart for each exception list.
+                count += append_hash_exceptions(
+                    &mut output,
+                    (local_sector - start) as u16,
+                    &original,
+                    &reconstructed,
+                );
+            }
+            output[count_offset..count_offset + 2].copy_from_slice(&count.to_be_bytes());
+        }
+        Ok(output.freeze())
+    }
+
     #[instrument(name = "BlockProcessorWIA::try_rvz_pack", skip_all)]
     fn try_rvz_pack(&mut self, data: &[u8], info: &GroupInfo) -> Option<Bytes> {
         let Some(junk_info) = self
@@ -1763,6 +1856,7 @@ impl DiscWriter for DiscWriterWIA {
                 compressor: compressor.clone(),
                 lfg: LaggedFibonacci::default(),
                 junk_info: self.junk_info.clone(),
+                hash_group: None,
             },
             self.group_count,
             #[cfg(feature = "threading")]
@@ -1975,5 +2069,55 @@ fn compress_bound(compression: Compression, size: usize) -> usize {
         #[cfg(feature = "compress-zstd")]
         Compression::Zstandard(_) => crate::util::compress::zstd_api::compress_bound(size),
         _ => unimplemented!("CompressionKind::compress_bound {:?}", compression),
+    }
+}
+
+#[cfg(test)]
+mod hash_exception_tests {
+    use super::*;
+
+    fn restore(encoded: &[u8], sector: u16, hash_data: &mut [u8; HASHES_SIZE]) {
+        for exception in encoded.chunks_exact(22) {
+            let offset =
+                u16::from_be_bytes([exception[0], exception[1]]) - sector * HASHES_SIZE as u16;
+            hash_data[offset as usize..offset as usize + 20].copy_from_slice(&exception[2..]);
+        }
+    }
+
+    #[test]
+    fn exceptions_preserve_each_hash_and_padding_byte() {
+        for changed_offset in 0..HASHES_SIZE {
+            let reconstructed = [0u8; HASHES_SIZE];
+            let mut original = reconstructed;
+            original[changed_offset] = 0xa5;
+            let mut encoded = BytesMut::new();
+            let count = append_hash_exceptions(&mut encoded, 0, &original, &reconstructed);
+            assert!((1..=2).contains(&count));
+            assert_eq!(encoded.len(), count as usize * 22);
+            let mut restored = reconstructed;
+            restore(&encoded, 0, &mut restored);
+            assert_eq!(restored, original, "lost byte at {changed_offset:#x}");
+        }
+    }
+
+    #[test]
+    fn maximum_exceptions_cover_last_sector_including_zero_hashes() {
+        let reconstructed = [0xa5u8; HASHES_SIZE];
+        let original = [0u8; HASHES_SIZE];
+        let mut encoded = BytesMut::new();
+        let count = append_hash_exceptions(&mut encoded, 63, &original, &reconstructed);
+        assert_eq!(count, 52);
+        assert_eq!(encoded.len(), 52 * 22);
+        let mut restored = reconstructed;
+        restore(&encoded, 63, &mut restored);
+        assert_eq!(restored, original);
+    }
+
+    #[test]
+    fn unchanged_hash_area_needs_no_exceptions() {
+        let original = [0xa5u8; HASHES_SIZE];
+        let mut encoded = BytesMut::new();
+        assert_eq!(append_hash_exceptions(&mut encoded, 7, &original, &original), 0);
+        assert!(encoded.is_empty());
     }
 }
