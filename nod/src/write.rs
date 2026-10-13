@@ -98,6 +98,9 @@ pub enum ScrubLevel {
 /// writing fails. The second and third arguments are the current bytes processed and the total
 /// bytes to process, respectively. For most formats, this has no relation to the written disc size,
 /// but can be used to display progress.
+///
+/// WIA/RVZ may also call this with empty data at progress checkpoints. Return an error
+/// from any callback to stop processing, for example when cancellation is requested.
 pub type DataCallback<'a> = dyn FnMut(Bytes, u64, u64) -> io::Result<()> + 'a;
 
 /// A constructed disc writer.

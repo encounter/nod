@@ -1768,6 +1768,10 @@ impl DiscWriter for DiscWriterWIA {
             #[cfg(feature = "threading")]
             options.processor_threads,
             |group| -> Result<()> {
+                // Empty and reused groups still need a progress/cancellation
+                // checkpoint even when no bytes will be written for this group.
+                data_callback(Bytes::new(), input_position, disc_size)
+                    .context("Checking WIA/RVZ progress")?;
                 // Update hashers
                 input_position += group.disc_data.len() as u64;
                 digest.send(group.disc_data);
@@ -1815,6 +1819,9 @@ impl DiscWriter for DiscWriterWIA {
         )?;
         debug!("Saved {} bytes with group data reuse", reuse_size);
 
+        data_callback(Bytes::new(), input_position, disc_size)
+            .context("Finalizing WIA/RVZ output")?;
+
         // Collect hash results
         let digest_results = digest.finish();
         let mut nkit_header = NKitHeader {
@@ -1847,6 +1854,8 @@ impl DiscWriter for DiscWriterWIA {
         //     self.data_start
         // );
         disc.raw_data_size = (compressed_raw_data.len() as u32).into();
+        data_callback(Bytes::new(), input_position, disc_size)
+            .context("Finalizing WIA/RVZ raw data")?;
 
         let groups_data = if self.is_rvz {
             Cow::Borrowed(groups.as_bytes())
