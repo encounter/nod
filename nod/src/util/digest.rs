@@ -102,11 +102,10 @@ mod multi_threaded {
         }
 
         #[instrument(name = "DigestManager::finish", skip_all)]
-        pub fn finish(self) -> DigestResults {
+        pub fn finish(mut self) -> DigestResults {
             let mut results = DigestResults { crc32: None, md5: None, sha1: None, xxh64: None };
-            for (tx, handle) in self.threads {
-                drop(tx); // Close channel
-                match handle.join().unwrap() {
+            for result in self.join_threads() {
+                match result.unwrap() {
                     DigestResult::Crc32(v) => results.crc32 = Some(v),
                     DigestResult::Md5(v) => results.md5 = Some(v),
                     DigestResult::Sha1(v) => results.sha1 = Some(v),
@@ -114,6 +113,101 @@ mod multi_threaded {
                 }
             }
             results
+        }
+
+        fn join_threads(&mut self) -> Vec<thread::Result<DigestResult>> {
+            let handles: Vec<_> = self
+                .threads
+                .drain(..)
+                .map(|(tx, handle)| {
+                    drop(tx);
+                    handle
+                })
+                .collect();
+            // Close ALL senders before waiting for any worker. Collect every
+            // join result before propagating a panic from normal finish().
+            handles.into_iter().map(|handle| handle.join()).collect()
+        }
+    }
+
+    impl Drop for DigestManager {
+        fn drop(&mut self) {
+            // On writer errors/cancellation finish() is skipped. Do not detach
+            // digest workers or leave input blocks alive after cleanup returns.
+            let _ = self.join_threads();
+        }
+    }
+
+    #[cfg(test)]
+    mod shutdown_tests {
+        use std::{
+            sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            },
+            time::Duration,
+        };
+
+        use super::*;
+
+        fn coordinated_manager() -> (DigestManager, Arc<AtomicUsize>) {
+            let (first_tx, first_rx) = crossbeam_channel::bounded::<Bytes>(1);
+            let (second_tx, second_rx) = crossbeam_channel::bounded::<Bytes>(1);
+            let (second_closed_tx, second_closed_rx) = crossbeam_channel::bounded(1);
+            let finished = Arc::new(AtomicUsize::new(0));
+            let first_finished = finished.clone();
+            let first = thread::spawn(move || {
+                assert!(first_rx.recv().is_err());
+                // This cannot complete if cleanup closes/joins workers one by
+                // one while the second sender remains alive.
+                second_closed_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                first_finished.fetch_add(1, Ordering::SeqCst);
+                DigestResult::Crc32(7)
+            });
+            let second_finished = finished.clone();
+            let second = thread::spawn(move || {
+                assert!(second_rx.recv().is_err());
+                second_closed_tx.send(()).unwrap();
+                second_finished.fetch_add(1, Ordering::SeqCst);
+                DigestResult::Sha1([8; 20])
+            });
+            (DigestManager { threads: vec![(first_tx, first), (second_tx, second)] }, finished)
+        }
+
+        #[test]
+        fn drop_closes_all_inputs_and_joins_every_digest_worker() {
+            let (manager, finished) = coordinated_manager();
+            drop(manager);
+            assert_eq!(finished.load(Ordering::SeqCst), 2);
+        }
+
+        #[test]
+        fn finish_closes_all_inputs_and_keeps_digest_results() {
+            let (manager, finished) = coordinated_manager();
+            let results = manager.finish();
+            assert_eq!(finished.load(Ordering::SeqCst), 2);
+            assert_eq!(results.crc32, Some(7));
+            assert_eq!(results.sha1, Some([8; 20]));
+        }
+
+        #[test]
+        fn normal_finish_hashes_all_queued_input() {
+            let manager = DigestManager::new(&ProcessOptions {
+                digest_crc32: true,
+                digest_sha1: true,
+                ..Default::default()
+            });
+            manager.send(Bytes::from_static(b"a"));
+            manager.send(Bytes::from_static(b"bc"));
+            let results = manager.finish();
+            assert_eq!(results.crc32, Some(0x352441c2));
+            assert_eq!(
+                results.sha1,
+                Some([
+                    0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e, 0x25, 0x71, 0x78,
+                    0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+                ])
+            );
         }
     }
 }
