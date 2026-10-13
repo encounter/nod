@@ -288,15 +288,7 @@ impl Preloader {
     }
 
     #[allow(unused)]
-    pub fn shutdown(self) {
-        #[cfg(feature = "threading")]
-        {
-            let guard = self.threads.into_inner().unwrap();
-            for handle in guard.join_handles {
-                handle.join().unwrap();
-            }
-        }
-    }
+    pub fn shutdown(self) { drop(self); }
 
     #[instrument(name = "Preloader::fetch", skip_all)]
     pub fn fetch(&self, request: SectorGroupRequest, max_groups: u32) -> SectorGroupResult {
@@ -358,6 +350,29 @@ impl Preloader {
                 Ok(group)
             }
             Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(feature = "threading")]
+impl Drop for Preloader {
+    fn drop(&mut self) {
+        // Workers own loaders and the cache, not an Arc<Preloader>. Disconnect
+        // every original channel before joining: idle workers leave recv(), and
+        // active workers stop after the current load instead of draining queued
+        // prefetch requests. In particular, never join with request_tx alive.
+        let (stat_tx, stat_rx) = crossbeam_channel::unbounded();
+        drop(std::mem::replace(&mut self.stat_tx, stat_tx));
+        drop(std::mem::replace(&mut self.stat_rx, stat_rx));
+        let (request_tx, request_rx) = crossbeam_channel::unbounded();
+        drop(std::mem::replace(&mut self.request_tx, request_tx));
+        drop(std::mem::replace(&mut self.request_rx, request_rx));
+
+        let threads = self.threads.get_mut().unwrap_or_else(|error| error.into_inner());
+        for handle in threads.join_handles.drain(..) {
+            // Cleanup may run while another error is unwinding. Join every
+            // worker without turning a worker panic into a second panic.
+            let _ = handle.join();
         }
     }
 }
@@ -682,4 +697,64 @@ pub fn fetch_sector_group<'a>(
     });
     let sector_group = preloader.fetch(request, max_groups)?;
     Ok((cached.insert(sector_group), true))
+}
+
+#[cfg(all(test, feature = "threading"))]
+mod shutdown_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::read::DiscMeta;
+
+    #[derive(Clone)]
+    struct UnusedReader;
+
+    impl BlockReader for UnusedReader {
+        fn read_block(&mut self, _: &mut [u8], _: u32) -> io::Result<Block> {
+            panic!("shutdown test must not read disc data")
+        }
+
+        fn block_size(&self) -> u32 { SECTOR_SIZE as u32 }
+
+        fn meta(&self) -> DiscMeta { DiscMeta::default() }
+    }
+
+    #[test]
+    fn shutdown_disconnects_request_and_stat_channels_before_joining_workers() {
+        let loader = SectorGroupLoader::new(
+            Box::new(UnusedReader),
+            Arc::new(DiscHeader::new_zeroed()),
+            Arc::from([]),
+        );
+        let mut preloader = match Arc::try_unwrap(Preloader::new(loader, 0)) {
+            Ok(preloader) => preloader,
+            Err(_) => panic!("unexpected shared preloader"),
+        };
+        let finished = Arc::new(AtomicUsize::new(0));
+        for thread_id in 0..2 {
+            let requests = preloader.request_rx.clone();
+            let stats = preloader.stat_tx.clone();
+            let finished = finished.clone();
+            let handle = std::thread::spawn(move || {
+                assert!(matches!(
+                    requests.recv_timeout(Duration::from_secs(2)),
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected)
+                ));
+                assert!(
+                    stats
+                        .send(PreloaderThreadStats {
+                            thread_id,
+                            wait_time: Duration::ZERO,
+                            req_time: Duration::ZERO,
+                            io_time: Duration::ZERO,
+                        })
+                        .is_err()
+                );
+                finished.fetch_add(1, Ordering::SeqCst);
+            });
+            preloader.threads.get_mut().unwrap().join_handles.push(handle);
+        }
+        preloader.shutdown();
+        assert_eq!(finished.load(Ordering::SeqCst), 2);
+    }
 }
