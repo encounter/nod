@@ -6,6 +6,36 @@ use std::{
 
 use crate::{ErrorContext, Result, ResultContext, read::DiscStream};
 
+trait ReadExactAt {
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()>;
+}
+
+impl ReadExactAt for File {
+    #[cfg(unix)]
+    #[inline]
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        std::os::unix::fs::FileExt::read_exact_at(self, buf, offset)
+    }
+
+    #[cfg(windows)]
+    #[inline]
+    fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> io::Result<()> {
+        while !buf.is_empty() {
+            match std::os::windows::fs::FileExt::seek_read(&self.file, buf, offset) {
+                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Ok(n) => {
+                    buf = &mut buf[n..];
+                    offset += n as u64;
+                }
+                Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct SplitFileReader {
     files: Vec<Split<PathBuf>>,
@@ -20,7 +50,9 @@ struct Split<T> {
 }
 
 impl<T> Split<T> {
-    fn contains(&self, pos: u64) -> bool { self.begin <= pos && pos < self.begin + self.size }
+    fn contains(&self, pos: u64) -> bool {
+        self.begin <= pos && pos < self.begin + self.size
+    }
 }
 
 // .iso.1, .iso.2, etc.
@@ -54,7 +86,9 @@ fn split_path_3(input: &Path, index: u32) -> PathBuf {
 }
 
 impl SplitFileReader {
-    pub fn empty() -> Self { Self { files: Vec::new(), open_file: Default::default() } }
+    pub fn empty() -> Self {
+        Self { files: Vec::new(), open_file: Default::default() }
+    }
 
     pub fn new(path: &Path) -> Result<Self> {
         let mut files = vec![];
@@ -101,11 +135,15 @@ impl SplitFileReader {
         Ok(())
     }
 
-    pub fn len(&self) -> u64 { self.files.last().map_or(0, |f| f.begin + f.size) }
+    pub fn len(&self) -> u64 {
+        self.files.last().map_or(0, |f| f.begin + f.size)
+    }
 }
 
 impl Clone for SplitFileReader {
-    fn clone(&self) -> Self { Self { files: self.files.clone(), open_file: Default::default() } }
+    fn clone(&self) -> Self {
+        Self { files: self.files.clone(), open_file: Default::default() }
+    }
 }
 
 impl DiscStream for SplitFileReader {
@@ -125,24 +163,16 @@ impl DiscStream for SplitFileReader {
             let file_offset = offset - split.begin;
             let len = (split.size - file_offset).min(buf.len() as u64) as usize;
             let (out, remain) = buf.split_at_mut(len);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::FileExt;
-                split.inner.read_exact_at(out, file_offset)?;
-            }
-            #[cfg(not(unix))]
-            {
-                use std::io::{Read, Seek, SeekFrom};
-                split.inner.seek(SeekFrom::Start(file_offset))?;
-                split.inner.read_exact(out)?
-            }
+            split.inner.read_exact_at(out, file_offset)?;
             buf = remain;
             offset += len as u64;
         }
         Ok(())
     }
 
-    fn stream_len(&mut self) -> io::Result<u64> { Ok(self.len()) }
+    fn stream_len(&mut self) -> io::Result<u64> {
+        Ok(self.len())
+    }
 }
 
 #[cfg(test)]
@@ -165,11 +195,15 @@ mod tests {
             Self(path)
         }
 
-        fn path(&self) -> &Path { &self.0 }
+        fn path(&self) -> &Path {
+            &self.0
+        }
     }
 
     impl Drop for TestDir {
-        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
